@@ -1,0 +1,65 @@
+name: CI
+
+# Full pipeline on every push and pull request. Steps run in the order
+# mandated by .ai/testing_and_health.md §"CI/CD expectations"; any failure
+# fails the job and blocks the merge. Runs on Linux because the race detector
+# (needs a C toolchain) and `docker build` are unavailable on the Windows dev
+# host but work here.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build-test-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # Step 1 — frontend: install, lint, typecheck, unit tests, then build
+      # the SPA into ui/dist (needed by go:embed in later steps).
+      - name: Frontend (lint, typecheck, vitest, build)
+        working-directory: ui
+        run: |
+          npm ci
+          npm run lint
+          npx tsc --noEmit
+          npx vitest run
+          npm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: true
+
+      # Step 2 — Go static analysis.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      # Step 3 — Go tests with the race detector. ui/dist exists from step 1,
+      # so the //go:embed of the SPA compiles.
+      - name: Go tests (race)
+        run: go test -race ./...
+
+      # Step 4 — CGO-free production build of the server binary.
+      - name: Go build (CGO-free)
+        run: CGO_ENABLED=0 go build ./cmd/omnishelf
+
+      # Step 5 — multi-stage container build. On main it is tagged `latest`.
+      - name: Docker build
+        run: docker build -t omnishelf:${{ github.ref == 'refs/heads/main' && 'latest' || github.sha }} .

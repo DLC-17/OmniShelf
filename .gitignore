@@ -1,0 +1,41 @@
+# Go
+/omnishelf
+/omnishelf.exe
+*.exe
+*.test
+*.out
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
+
+# Node / frontend
+node_modules/
+ui/dist/*
+!ui/dist/.gitkeep
+
+# Env / local
+.env
+.env.local
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
+
+# Local container run volumes
+.run/
+
+# Up-to-speed onboarding doc (local, not versioned)
+up-to-speed*
+up_to_speed*
+UP-TO-SPEED*
+UP_TO_SPEED*
+
+# Agentic / orchestration artifacts (not part of the published product)
+.ai/
+.claude/
+ORCHESTRATION_LOG.md
+task_manifest.json
+project_spec.md
+Architecture.md

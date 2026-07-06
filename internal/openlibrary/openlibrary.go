@@ -1,0 +1,242 @@
+// Package openlibrary provides a client for OpenLibrary ISBN lookups.
+//
+// Every request carries the mandatory User-Agent
+// "OmniShelf/1.0 (<contact email>)" (architecture hard rule 4). Lookups
+// return whatever metadata exists — missing works, authors or covers never
+// block a result (spec E5). A missing ISBN yields ErrNotFound (spec E4).
+package openlibrary
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+	"time"
+)
+
+const (
+	defaultBaseURL  = "https://openlibrary.org"
+	defaultCoverURL = "https://covers.openlibrary.org"
+)
+
+// ErrNotFound is returned when OpenLibrary has no record for an ISBN (E4).
+var ErrNotFound = errors.New("openlibrary: not found")
+
+// NotFoundError wraps ErrNotFound with the ISBN that missed, so callers can
+// echo it in the API error envelope.
+type NotFoundError struct {
+	ISBN string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("openlibrary: no record for ISBN %s", e.ISBN)
+}
+
+// Unwrap lets errors.Is(err, ErrNotFound) match.
+func (e *NotFoundError) Unwrap() error { return ErrNotFound }
+
+// Client talks to the OpenLibrary API.
+type Client struct {
+	userAgent  string
+	baseURL    string
+	coverURL   string
+	httpClient *http.Client
+}
+
+// Option customizes a Client.
+type Option func(*Client)
+
+// WithBaseURL overrides the OpenLibrary base URL (used by tests).
+func WithBaseURL(u string) Option {
+	return func(c *Client) { c.baseURL = strings.TrimRight(u, "/") }
+}
+
+// WithCoverBaseURL overrides the covers.openlibrary.org base URL (tests).
+func WithCoverBaseURL(u string) Option {
+	return func(c *Client) { c.coverURL = strings.TrimRight(u, "/") }
+}
+
+// WithHTTPClient overrides the shared HTTP client.
+func WithHTTPClient(h *http.Client) Option {
+	return func(c *Client) { c.httpClient = h }
+}
+
+// New returns an OpenLibrary client identifying itself as
+// "OmniShelf/1.0 (<contactEmail>)" on every request.
+func New(contactEmail string, opts ...Option) *Client {
+	c := &Client{
+		userAgent:  fmt.Sprintf("OmniShelf/1.0 (%s)", contactEmail),
+		baseURL:    defaultBaseURL,
+		coverURL:   defaultCoverURL,
+		httpClient: &http.Client{Timeout: 15 * time.Second},
+	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
+}
+
+// Book is the merged edition + work metadata for one ISBN. Any field may be
+// zero-valued when OpenLibrary lacks the data (E5).
+type Book struct {
+	ISBN13      string
+	Title       string
+	Authors     []string
+	Description string
+	PageCount   int
+	CoverID     int // OpenLibrary cover ID; 0 = no cover known
+	WorkKey     string
+}
+
+// edition is the /isbn/{isbn}.json payload subset we use.
+type edition struct {
+	Title         string   `json:"title"`
+	NumberOfPages int      `json:"number_of_pages"`
+	Covers        []int    `json:"covers"`
+	ISBN13        []string `json:"isbn_13"`
+	Works         []struct {
+		Key string `json:"key"`
+	} `json:"works"`
+	Authors []struct {
+		Key string `json:"key"`
+	} `json:"authors"`
+}
+
+// work is the /works/{id}.json payload subset we use. Description is either
+// a plain string or {"type": ..., "value": ...}.
+type work struct {
+	Description json.RawMessage `json:"description"`
+	Covers      []int           `json:"covers"`
+	Authors     []struct {
+		Author struct {
+			Key string `json:"key"`
+		} `json:"author"`
+	} `json:"authors"`
+}
+
+// author is the /authors/{id}.json payload subset we use.
+type author struct {
+	Name string `json:"name"`
+}
+
+// GetByISBN looks up an edition by ISBN and, when the edition references a
+// Work, follows it for the description and author names. Partial metadata is
+// returned as-is; only a missing edition record is an error (ErrNotFound).
+func (c *Client) GetByISBN(ctx context.Context, isbn string) (*Book, error) {
+	var ed edition
+	if err := c.getJSON(ctx, "/isbn/"+isbn+".json", &ed); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, &NotFoundError{ISBN: isbn}
+		}
+		return nil, err
+	}
+
+	book := &Book{
+		ISBN13:    isbn,
+		Title:     ed.Title,
+		PageCount: ed.NumberOfPages,
+	}
+	if len(ed.ISBN13) > 0 {
+		book.ISBN13 = ed.ISBN13[0]
+	}
+	if len(ed.Covers) > 0 {
+		book.CoverID = ed.Covers[0]
+	}
+
+	// Follow the work reference for description/authors when present.
+	// Failures here degrade gracefully — the edition data alone is enough
+	// to track the book (E5).
+	if len(ed.Works) > 0 {
+		book.WorkKey = ed.Works[0].Key
+		var w work
+		if err := c.getJSON(ctx, book.WorkKey+".json", &w); err == nil {
+			book.Description = decodeDescription(w.Description)
+			if book.CoverID == 0 && len(w.Covers) > 0 {
+				book.CoverID = w.Covers[0]
+			}
+			if len(ed.Authors) == 0 {
+				for _, a := range w.Authors {
+					if a.Author.Key != "" {
+						ed.Authors = append(ed.Authors, struct {
+							Key string `json:"key"`
+						}{Key: a.Author.Key})
+					}
+				}
+			}
+		}
+	}
+
+	for _, a := range ed.Authors {
+		var au author
+		if err := c.getJSON(ctx, a.Key+".json", &au); err == nil && au.Name != "" {
+			book.Authors = append(book.Authors, au.Name)
+		}
+	}
+
+	return book, nil
+}
+
+// CoverURL returns the covers.openlibrary.org URL for a cover ID at the
+// given size ("S", "M" or "L"). The actual download must go through
+// internal/images — never hotlink this URL from the frontend (hard rule 5).
+// Returns "" when the book has no known cover.
+func (c *Client) CoverURL(coverID int, size string) string {
+	if coverID == 0 {
+		return ""
+	}
+	if size == "" {
+		size = "L"
+	}
+	return fmt.Sprintf("%s/b/id/%d-%s.jpg", c.coverURL, coverID, size)
+}
+
+// getJSON performs a GET with the mandatory User-Agent and decodes JSON.
+func (c *Client) getJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return fmt.Errorf("openlibrary: build request: %w", err)
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("openlibrary: request %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
+		return ErrNotFound
+	case resp.StatusCode != http.StatusOK:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("openlibrary: %s returned status %d: %s", path, resp.StatusCode, string(body))
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("openlibrary: decode %s: %w", path, err)
+	}
+	return nil
+}
+
+// decodeDescription handles OpenLibrary's two description shapes: a bare
+// string, or {"type": "/type/text", "value": "..."}.
+func decodeDescription(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var obj struct {
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &obj); err == nil {
+		return obj.Value
+	}
+	return ""
+}

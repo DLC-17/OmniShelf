@@ -1,0 +1,17 @@
+{
+  "key": "/authors/OL34184A",
+  "name": "Roald Dahl",
+  "birth_date": "13 September 1916",
+  "death_date": "23 November 1990",
+  "bio": {
+    "type": "/type/text",
+    "value": "Roald Dahl was a British novelist, short story writer, and screenwriter."
+  },
+  "type": { "key": "/type/author" },
+  "photos": [9395323, 6287214],
+  "source_records": ["amazon:8420440248"],
+  "latest_revision": 26,
+  "revision": 26,
+  "created": { "type": "/type/datetime", "value": "2008-04-01T03:28:50.625462" },
+  "last_modified": { "type": "/type/datetime", "value": "2023-07-15T21:23:47.582138" }
+}
