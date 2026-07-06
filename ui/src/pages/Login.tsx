@@ -6,8 +6,6 @@ import { useAuth } from '../hooks/useAuth'
 
 type Mode = 'login' | 'register'
 
-const fieldStyle = { display: 'block', margin: '0.5rem auto', padding: '0.5rem', width: '16rem' }
-
 export default function Login() {
   const { refresh } = useAuth()
   const [mode, setMode] = useState<Mode>('login')
@@ -60,58 +58,55 @@ export default function Login() {
   }
 
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', textAlign: 'center', paddingTop: '4rem' }}>
-      <h1>OmniShelf</h1>
-      <h2>{mode === 'login' ? 'Sign in' : 'Create account'}</h2>
-      <form onSubmit={handleSubmit} noValidate>
-        <input
-          style={fieldStyle}
-          type="text"
-          placeholder="Username"
-          aria-label="Username"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-        <input
-          style={fieldStyle}
-          type="password"
-          placeholder="Password"
-          aria-label="Password"
-          autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-        {mode === 'register' && (
+    <main className="auth">
+      <div className="auth-card">
+        <span className="brand">OmniShelf</span>
+        <h2>{mode === 'login' ? 'Sign in' : 'Create account'}</h2>
+        <form className="auth-form" onSubmit={handleSubmit} noValidate>
           <input
-            style={fieldStyle}
             type="text"
-            placeholder="Invite code"
-            aria-label="Invite code"
-            value={inviteCode}
-            onChange={(e) => setInviteCode(e.target.value)}
+            placeholder="Username"
+            aria-label="Username"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
           />
-        )}
-        {error !== null && (
-          <p role="alert" style={{ color: 'crimson' }}>
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={submitting}>
-          {mode === 'login' ? 'Sign in' : 'Register'}
-        </button>
-      </form>
-      <p>
+          <input
+            type="password"
+            placeholder="Password"
+            aria-label="Password"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          {mode === 'register' && (
+            <input
+              type="text"
+              placeholder="Invite code"
+              aria-label="Invite code"
+              value={inviteCode}
+              onChange={(e) => setInviteCode(e.target.value)}
+            />
+          )}
+          {error !== null && (
+            <p role="alert" className="alert">
+              {error}
+            </p>
+          )}
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {mode === 'login' ? 'Sign in' : 'Register'}
+          </button>
+        </form>
         {mode === 'login' ? (
-          <button type="button" onClick={() => switchMode('register')}>
+          <button type="button" className="btn-ghost" onClick={() => switchMode('register')}>
             Have an invite code? Register
           </button>
         ) : (
-          <button type="button" onClick={() => switchMode('login')}>
+          <button type="button" className="btn-ghost" onClick={() => switchMode('login')}>
             Already have an account? Sign in
           </button>
         )}
-      </p>
+      </div>
     </main>
   )
 }

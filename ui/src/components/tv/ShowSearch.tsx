@@ -15,7 +15,7 @@ function airYear(result: TVSearchResult): string {
 }
 
 /**
- * Search-and-add flow (spec §2.2 steps 1–2): search box → TMDB results → Add
+ * Search-and-add flow: search box → TMDB results → Add
  * button. A duplicate add (409 duplicate_item, E16) is reported inline as
  * "already in your library" rather than as a failure.
  */
@@ -55,23 +55,22 @@ export default function ShowSearch() {
   return (
     <section aria-label="Add a show">
       <h2>Add a show</h2>
-      <form onSubmit={handleSubmit} role="search">
+      <form className="searchbar" onSubmit={handleSubmit} role="search">
         <input
           type="search"
           aria-label="Search TV shows"
           placeholder="Search TV shows…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          style={{ padding: '0.5rem', width: '16rem', marginRight: '0.5rem' }}
         />
-        <button type="submit" disabled={input.trim() === ''}>
+        <button type="submit" className="btn-primary" disabled={input.trim() === ''}>
           Search
         </button>
       </form>
 
-      {search.isFetching && <p>Searching…</p>}
+      {search.isFetching && <p className="muted">Searching…</p>}
       {search.isError && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="alert">
           {search.error instanceof ApiError && search.error.code === 'tmdb_unavailable'
             ? 'TMDB unreachable, try again'
             : 'Search failed. Try again.'}
@@ -81,30 +80,19 @@ export default function ShowSearch() {
         <p>No shows found for “{query}”.</p>
       )}
       {search.data !== undefined && search.data.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0, display: 'grid', gap: '0.5rem' }}>
+        <ul className="list">
           {search.data.map((result) => {
             const fb = feedback[result.id]
             return (
-              <li
-                key={result.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  border: '1px solid #ccc',
-                  borderRadius: 8,
-                  padding: '0.5rem 0.75rem',
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
+              <li key={result.id} className="card card-row">
+                <div className="grow">
                   <strong>{result.name}</strong>
-                  {airYear(result) !== '' && <span style={{ color: '#666' }}> ({airYear(result)})</span>}
+                  {airYear(result) !== '' && <span className="muted"> ({airYear(result)})</span>}
                   {result.overview !== '' && (
                     <p
+                      className="meta"
                       style={{
-                        margin: '0.25rem 0 0',
-                        color: '#666',
-                        fontSize: '0.85rem',
+                        marginTop: '0.25rem',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -115,12 +103,13 @@ export default function ShowSearch() {
                   )}
                 </div>
                 {fb !== undefined ? (
-                  <span role={fb.isError ? 'alert' : 'status'} style={fb.isError ? { color: 'crimson' } : undefined}>
+                  <span role={fb.isError ? 'alert' : 'status'} className={fb.isError ? 'alert' : 'muted'}>
                     {fb.text}
                   </span>
                 ) : (
                   <button
                     type="button"
+                    className="btn-confirm"
                     onClick={() => handleAdd(result.id)}
                     disabled={addShow.isPending}
                     aria-label={`Add ${result.name}`}

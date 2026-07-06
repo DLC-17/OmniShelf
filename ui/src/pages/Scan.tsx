@@ -65,7 +65,7 @@ export default function Scan() {
       <h1>Scan</h1>
 
       {!secure && (
-        <div role="alert" style={{ padding: '0.75rem', background: '#fef3c7', borderRadius: 4 }}>
+        <div role="alert" className="callout">
           <strong>Camera scanning needs a secure (HTTPS) connection.</strong>
           <p style={{ margin: '0.5rem 0 0' }}>
             Open OmniShelf over your Tailscale HTTPS address (https://…) to scan barcodes. You can
@@ -75,37 +75,39 @@ export default function Scan() {
       )}
 
       {secure && cameraDenied && (
-        <p role="alert">
+        <p role="alert" className="alert">
           Camera access was blocked. Grant camera permission and reload, or enter the ISBN manually
           below.
         </p>
       )}
 
       {notFoundIsbn !== null && (
-        <p role="alert">
+        <p role="alert" className="alert">
           No book found for ISBN {notFoundIsbn}. Check the number below and try again, or enter it
           by hand.
         </p>
       )}
 
       {error !== null && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="alert">
           {error}
         </p>
       )}
 
       {secure && !showManual && (
-        <div>
+        <div className="stack">
           <ScannerView onDetected={handleIsbn} onCameraError={() => setCameraDenied(true)} />
-          {looking && <p role="status">Looking up…</p>}
-          <button type="button" onClick={() => setManualMode(true)}>
-            Enter ISBN manually
-          </button>
+          {looking && <p role="status" className="muted">Looking up…</p>}
+          <div>
+            <button type="button" className="btn-ghost" onClick={() => setManualMode(true)}>
+              Enter ISBN manually
+            </button>
+          </div>
         </div>
       )}
 
       {showManual && (
-        <div>
+        <div className="stack">
           <ManualIsbnForm
             key={notFoundIsbn ?? 'manual'}
             initialIsbn={notFoundIsbn ?? ''}
@@ -113,9 +115,11 @@ export default function Scan() {
             busy={looking}
           />
           {secure && (
-            <button type="button" onClick={reset}>
-              Back to scanner
-            </button>
+            <div>
+              <button type="button" className="btn-ghost" onClick={reset}>
+                Back to scanner
+              </button>
+            </div>
           )}
         </div>
       )}

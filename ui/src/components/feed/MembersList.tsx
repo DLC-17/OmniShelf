@@ -4,7 +4,7 @@ import { fetchMembers } from '../../api/feed'
 
 /**
  * Instance members with tracked-item counts; each links to that member's
- * read-only shelf at /users/:id (spec §2.7).
+ * read-only shelf at /users/:id.
  */
 export default function MembersList() {
   const { data: members, isPending, isError } = useQuery({
@@ -13,21 +13,21 @@ export default function MembersList() {
   })
 
   if (isPending) {
-    return <p>Loading members…</p>
+    return <p className="muted">Loading members…</p>
   }
   if (isError) {
-    return <p role="alert">Could not load members.</p>
+    return <p role="alert" className="alert">Could not load members.</p>
   }
   if (members.length === 0) {
-    return <p>No members yet.</p>
+    return <p className="muted">No members yet.</p>
   }
 
   return (
-    <ul style={{ listStyle: 'none', padding: 0 }}>
+    <ul className="divided">
       {members.map((m) => (
-        <li key={m.id} style={{ padding: '0.25rem 0' }}>
+        <li key={m.id}>
           <Link to={`/users/${m.id}`}>{m.username}</Link>{' '}
-          <span style={{ color: '#666' }}>
+          <span className="muted">
             ({m.counts.tv} shows, {m.counts.books} books)
           </span>
         </li>

@@ -22,7 +22,7 @@ export function useUpNext() {
 }
 
 /**
- * One-tap watch checkmark (spec §2.2 step 4). Optimistically marks the card
+ * One-tap watch checkmark. Optimistically marks the card
  * watched, rolls back on error, and on success swaps the card's episode to the
  * next-up episode returned by the API — or removes the card when none remains.
  */

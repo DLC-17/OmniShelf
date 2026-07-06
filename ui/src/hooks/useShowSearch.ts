@@ -13,7 +13,7 @@ export function useShowSearch(query: string) {
 }
 
 /**
- * Adds a show by TMDB id (spec §2.2 step 2). A fresh add creates a WATCHING
+ * Adds a show by TMDB id. A fresh add creates a WATCHING
  * item, so both Up Next and the library shelf are refreshed on success.
  */
 export function useAddShow() {

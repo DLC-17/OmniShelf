@@ -19,7 +19,7 @@ const STATUS_LABELS: Record<LibraryStatusFilter, string> = {
 }
 
 /**
- * Read-only view of another member's shelf (spec §2.7) with type/status
+ * Read-only view of another member's shelf with type/status
  * filters. Writes remain strictly own-account, so there are no edit controls.
  */
 export default function UserLibrary() {
@@ -57,11 +57,11 @@ export default function UserLibrary() {
   return (
     <section>
       <h1>{member !== undefined ? `${member.username}'s shelf` : 'Member shelf'}</h1>
-      <p style={{ color: '#666' }}>Read-only view of another member&apos;s library.</p>
+      <p className="muted">Read-only view of another member&apos;s library.</p>
 
-      <div style={{ display: 'flex', gap: '1rem', marginBottom: '1rem' }}>
-        <label>
-          Type{' '}
+      <div className="toolbar">
+        <label className="field">
+          <span>Type</span>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value as LibraryTypeFilter | '')}
@@ -71,8 +71,8 @@ export default function UserLibrary() {
             <option value="BOOK">Books</option>
           </select>
         </label>
-        <label>
-          Status{' '}
+        <label className="field">
+          <span>Status</span>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as LibraryStatusFilter | '')}
@@ -87,20 +87,17 @@ export default function UserLibrary() {
         </label>
       </div>
 
-      {isPending && <p>Loading shelf…</p>}
-      {isError && <p role="alert">Could not load this member&apos;s shelf. Try reloading.</p>}
+      {isPending && <p className="muted">Loading shelf…</p>}
+      {isError && <p role="alert" className="alert">Could not load this member&apos;s shelf. Try reloading.</p>}
 
-      {items !== undefined && items.length === 0 && <p>Nothing on this shelf (yet).</p>}
+      {items !== undefined && items.length === 0 && <p className="empty">Nothing on this shelf (yet).</p>}
 
       {items !== undefined && items.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
+        <ul className="divided">
           {items.map((item) => (
-            <li
-              key={item.id}
-              style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee' }}
-            >
+            <li key={item.id}>
               <strong>{item.title}</strong>{' '}
-              <span style={{ color: '#666' }}>
+              <span className="muted">
                 {item.type === 'TV' ? 'TV' : 'Book'} · {item.status}
                 {item.type === 'BOOK' && item.progress > 0 && ` · page ${item.progress}`}
               </span>

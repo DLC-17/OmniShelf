@@ -9,7 +9,7 @@ interface PosterProps {
 }
 
 /**
- * Show poster with placeholder fallback (spec §2.8): posters are served from
+ * Show poster with placeholder fallback: posters are served from
  * the local /images cache; a missing path or a failed load renders a neutral
  * placeholder instead of a broken image.
  */
@@ -21,18 +21,8 @@ export default function Poster({ posterPath, title, width = 80, height = 120 }: 
       <div
         role="img"
         aria-label={`No poster for ${title}`}
-        style={{
-          width,
-          height,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: '#ddd',
-          color: '#666',
-          borderRadius: 4,
-          fontSize: '1.5rem',
-          flexShrink: 0,
-        }}
+        className="poster placeholder"
+        style={{ width, height }}
       >
         {title.charAt(0).toUpperCase()}
       </div>
@@ -45,7 +35,7 @@ export default function Poster({ posterPath, title, width = 80, height = 120 }: 
       alt={`Poster for ${title}`}
       width={width}
       height={height}
-      style={{ objectFit: 'cover', borderRadius: 4, flexShrink: 0 }}
+      className="poster"
       onError={() => setFailed(true)}
     />
   )

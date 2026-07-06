@@ -21,7 +21,7 @@ export interface TrackingItem {
   updatedAt: string
 }
 
-/** Tracking statuses a book may take (spec §2.5 step 4). */
+/** Tracking statuses a book may take. */
 export type BookStatus = 'READING' | 'PLAN_TO' | 'COMPLETED'
 
 /**

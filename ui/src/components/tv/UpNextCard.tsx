@@ -24,42 +24,20 @@ export default function UpNextCard({ entry, onMarkWatched }: UpNextCardProps) {
   const label = episode.title === '' ? code : `${code} · ${episode.title}`
 
   return (
-    <li
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '1rem',
-        padding: '0.75rem',
-        border: '1px solid #ccc',
-        borderRadius: 8,
-        opacity: watched ? 0.6 : 1,
-      }}
-    >
+    <li className={watched ? 'card card-row is-dim' : 'card card-row'}>
       <Poster posterPath={show.posterPath} title={show.title} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <h3 style={{ margin: '0 0 0.25rem' }}>{show.title}</h3>
+      <div className="grow">
+        <h3>{show.title}</h3>
         <p style={{ margin: 0 }}>{label}</p>
-        {episode.airDate !== null && (
-          <p style={{ margin: 0, color: '#666', fontSize: '0.85rem' }}>Aired {episode.airDate}</p>
-        )}
+        {episode.airDate !== null && <p className="meta">Aired {episode.airDate}</p>}
       </div>
       <button
         type="button"
+        className="check"
         aria-label={`Mark ${show.title} ${code} watched`}
         aria-pressed={watched}
         disabled={watched}
         onClick={() => onMarkWatched(episode.id)}
-        style={{
-          width: '2.75rem',
-          height: '2.75rem',
-          borderRadius: '50%',
-          border: '2px solid #2e7d32',
-          background: watched ? '#2e7d32' : 'transparent',
-          color: watched ? '#fff' : '#2e7d32',
-          fontSize: '1.25rem',
-          cursor: watched ? 'default' : 'pointer',
-          flexShrink: 0,
-        }}
       >
         &#10003;
       </button>

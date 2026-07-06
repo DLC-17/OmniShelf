@@ -16,7 +16,7 @@ function formatTimestamp(iso: string): string {
 }
 
 /**
- * Household activity feed (spec §2.7): reverse-chronological entries across
+ * Household activity feed: reverse-chronological entries across
  * all users, paginated with the server's opaque `nextBefore` cursor. The
  * cursor is passed back verbatim, so appended pages never duplicate or skip
  * entries.
@@ -42,31 +42,35 @@ export default function Feed() {
     <section>
       <h1>Feed</h1>
 
-      {isPending && <p>Loading activity…</p>}
-      {isError && <p role="alert">Could not load the activity feed. Try reloading.</p>}
+      {isPending && <p className="muted">Loading activity…</p>}
+      {isError && <p role="alert" className="alert">Could not load the activity feed. Try reloading.</p>}
 
       {!isPending && !isError && entries.length === 0 && (
-        <p>
+        <p className="empty">
           Nothing here yet. Activity shows up as household members watch episodes, add shows and
           books, or finish reading — start by adding something to your library.
         </p>
       )}
 
       {entries.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0 }}>
+        <ul className="divided">
           {entries.map((e) => (
-            <li key={entryKey(e)} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
+            <li key={entryKey(e)}>
               <strong>{e.user.username}</strong> {e.action}
-              <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                {formatTimestamp(e.timestamp)}
-              </div>
+              <div className="meta">{formatTimestamp(e.timestamp)}</div>
             </li>
           ))}
         </ul>
       )}
 
       {hasNextPage && (
-        <button type="button" onClick={() => void fetchNextPage()} disabled={isFetchingNextPage}>
+        <button
+          type="button"
+          className="btn-primary"
+          style={{ marginTop: '1rem' }}
+          onClick={() => void fetchNextPage()}
+          disabled={isFetchingNextPage}
+        >
           {isFetchingNextPage ? 'Loading…' : 'Load more'}
         </button>
       )}

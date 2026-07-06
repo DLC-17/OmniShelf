@@ -9,7 +9,7 @@ interface LibraryRowProps {
 }
 
 /**
- * One library shelf row with inline editing (spec §2.6): a status dropdown for
+ * One library shelf row with inline editing: a status dropdown for
  * every item, a page-number field for books (TV progress is derived
  * server-side and not editable), and a delete button gated behind a confirm.
  */
@@ -59,24 +59,14 @@ export default function LibraryRow({ item }: LibraryRowProps) {
   }
 
   return (
-    <li
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.75rem',
-        flexWrap: 'wrap',
-        border: '1px solid #ccc',
-        borderRadius: 8,
-        padding: '0.5rem 0.75rem',
-      }}
-    >
-      <div style={{ flex: 1, minWidth: '10rem' }}>
+    <li className="card card-row wrap">
+      <div className="grow" style={{ minWidth: '10rem' }}>
         <strong>{item.title}</strong>
-        <span style={{ color: '#666', marginLeft: '0.5rem', fontSize: '0.85rem' }}>{item.type}</span>
+        <span className="tag">{item.type}</span>
       </div>
 
-      <label>
-        <span style={{ marginRight: '0.25rem' }}>Status</span>
+      <label className="field">
+        <span>Status</span>
         <select
           aria-label={`Status for ${item.title}`}
           value={item.status}
@@ -92,8 +82,8 @@ export default function LibraryRow({ item }: LibraryRowProps) {
       </label>
 
       {item.type === 'BOOK' && (
-        <label>
-          <span style={{ marginRight: '0.25rem' }}>Page</span>
+        <label className="field">
+          <span>Page</span>
           <input
             type="number"
             min={0}
@@ -108,18 +98,19 @@ export default function LibraryRow({ item }: LibraryRowProps) {
       )}
 
       {confirming ? (
-        <span>
-          <span style={{ marginRight: '0.5rem' }}>Remove?</span>
-          <button type="button" onClick={handleDelete} disabled={remove.isPending}>
+        <span className="cluster">
+          <span className="muted">Remove?</span>
+          <button type="button" className="btn-danger" onClick={handleDelete} disabled={remove.isPending}>
             Confirm
           </button>
-          <button type="button" onClick={() => setConfirming(false)} disabled={remove.isPending}>
+          <button type="button" className="btn-ghost" onClick={() => setConfirming(false)} disabled={remove.isPending}>
             Cancel
           </button>
         </span>
       ) : (
         <button
           type="button"
+          className="btn-danger"
           aria-label={`Delete ${item.title}`}
           onClick={() => setConfirming(true)}
         >
@@ -128,7 +119,7 @@ export default function LibraryRow({ item }: LibraryRowProps) {
       )}
 
       {error !== null && (
-        <p role="alert" style={{ color: 'crimson', width: '100%', margin: 0 }}>
+        <p role="alert" className="alert" style={{ width: '100%', margin: 0 }}>
           {error}
         </p>
       )}

@@ -8,7 +8,7 @@ const TYPE_OPTIONS: MediaType[] = ['TV', 'BOOK']
 const STATUS_OPTIONS: ItemStatus[] = ['WATCHING', 'READING', 'PLAN_TO', 'COMPLETED']
 
 /**
- * Library shelf (spec §2.6): the user's tracked items with type/status filters
+ * Library shelf: the user's tracked items with type/status filters
  * and inline status/progress editing plus confirm-gated delete per row.
  */
 export default function Library() {
@@ -21,9 +21,9 @@ export default function Library() {
     <section>
       <h1>Library</h1>
 
-      <div style={{ display: 'flex', gap: '1rem', margin: '1rem 0', flexWrap: 'wrap' }}>
-        <label>
-          <span style={{ marginRight: '0.25rem' }}>Type</span>
+      <div className="toolbar">
+        <label className="field">
+          <span>Type</span>
           <select
             aria-label="Filter by type"
             value={type}
@@ -37,8 +37,8 @@ export default function Library() {
             ))}
           </select>
         </label>
-        <label>
-          <span style={{ marginRight: '0.25rem' }}>Status</span>
+        <label className="field">
+          <span>Status</span>
           <select
             aria-label="Filter by status"
             value={status}
@@ -54,9 +54,9 @@ export default function Library() {
         </label>
       </div>
 
-      {library.isPending && <p>Loading your library…</p>}
+      {library.isPending && <p className="muted">Loading your library…</p>}
       {library.isError && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="alert">
           {library.error instanceof ApiError
             ? library.error.message
             : 'Could not load your library. Try refreshing.'}
@@ -64,14 +64,14 @@ export default function Library() {
       )}
 
       {library.data !== undefined && library.data.length === 0 && (
-        <p>
+        <p className="empty">
           No items match these filters. Add a show from Up Next or scan a book to start building your
           shelf.
         </p>
       )}
 
       {library.data !== undefined && library.data.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0, display: 'grid', gap: '0.5rem' }}>
+        <ul className="list">
           {library.data.map((item) => (
             <LibraryRow key={item.id} item={item} />
           ))}

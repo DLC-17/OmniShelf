@@ -4,7 +4,7 @@ import UpNextCard from '../components/tv/UpNextCard'
 import { useMarkWatched, useUpNext } from '../hooks/useUpNext'
 
 /**
- * Up Next dashboard (spec §2.2): one card per WATCHING show with its earliest
+ * Up Next dashboard: one card per WATCHING show with its earliest
  * aired, unwatched episode and a one-tap watch checkmark. The search/add flow
  * lives on the same page so an empty dashboard leads straight into adding.
  */
@@ -16,9 +16,9 @@ export default function UpNext() {
     <section>
       <h1>Up Next</h1>
 
-      {upNext.isPending && <p>Loading your shows…</p>}
+      {upNext.isPending && <p className="muted">Loading your shows…</p>}
       {upNext.isError && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="alert">
           {upNext.error instanceof ApiError
             ? upNext.error.message
             : 'Could not load Up Next. Try refreshing.'}
@@ -26,14 +26,14 @@ export default function UpNext() {
       )}
 
       {upNext.data !== undefined && upNext.data.length === 0 && (
-        <p>
+        <p className="empty">
           Nothing to watch right now. Search for a show below to start tracking it, or mark a show
           as Watching from your Library — new episodes appear here after the nightly sync.
         </p>
       )}
 
       {upNext.data !== undefined && upNext.data.length > 0 && (
-        <ul style={{ listStyle: 'none', padding: 0, display: 'grid', gap: '0.75rem' }}>
+        <ul className="list">
           {upNext.data.map((entry) => (
             <UpNextCard
               key={entry.show.id}
@@ -45,12 +45,12 @@ export default function UpNext() {
       )}
 
       {markWatched.isError && (
-        <p role="alert" style={{ color: 'crimson' }}>
+        <p role="alert" className="alert">
           Could not mark the episode watched. Please try again.
         </p>
       )}
 
-      <hr style={{ margin: '1.5rem 0' }} />
+      <hr />
       <ShowSearch />
     </section>
   )

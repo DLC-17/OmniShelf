@@ -1,6 +1,6 @@
 import { ApiError, request } from './client'
 
-/** TV Time legacy import endpoints (spec §2.4). */
+/** TV Time legacy import endpoints. */
 
 export type ImportJobStatus = 'PENDING' | 'RUNNING' | 'DONE' | 'FAILED'
 
@@ -9,9 +9,9 @@ export interface ImportJob {
   status: ImportJobStatus
   processed: number
   total: number
-  /** Malformed data rows skipped during processing (spec E9). */
+  /** Malformed data rows skipped during processing. */
   skipped: number
-  /** Show titles that could not be matched on TMDB (spec E8). */
+  /** Show titles that could not be matched on TMDB. */
   unresolved: string[]
   error?: string
 }

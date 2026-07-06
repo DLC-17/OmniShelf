@@ -2,11 +2,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { logout } from '../api/auth'
 import { useAuth } from '../hooks/useAuth'
 
-const navLinkStyle = ({ isActive }: { isActive: boolean }) => ({
-  marginRight: '1rem',
-  textDecoration: 'none',
-  fontWeight: isActive ? 700 : 400,
-})
+const navLinkClass = ({ isActive }: { isActive: boolean }) =>
+  isActive ? 'nav-link active' : 'nav-link'
 
 export default function Layout() {
   const { user, clear } = useAuth()
@@ -23,29 +20,27 @@ export default function Layout() {
   }
 
   return (
-    <div style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 960, margin: '0 auto', padding: '0 1rem' }}>
-      <nav
-        aria-label="Main navigation"
-        style={{ display: 'flex', alignItems: 'center', padding: '1rem 0', flexWrap: 'wrap' }}
-      >
-        <NavLink to="/" style={navLinkStyle} end>
+    <div className="app-shell">
+      <nav className="topnav" aria-label="Main navigation">
+        <span className="brand">OmniShelf</span>
+        <NavLink to="/" className={navLinkClass} end>
           Up Next
         </NavLink>
-        <NavLink to="/library" style={navLinkStyle}>
+        <NavLink to="/library" className={navLinkClass}>
           Library
         </NavLink>
-        <NavLink to="/scan" style={navLinkStyle}>
+        <NavLink to="/scan" className={navLinkClass}>
           Scan
         </NavLink>
-        <NavLink to="/feed" style={navLinkStyle}>
+        <NavLink to="/feed" className={navLinkClass}>
           Feed
         </NavLink>
-        <NavLink to="/import" style={navLinkStyle}>
+        <NavLink to="/import" className={navLinkClass}>
           Import
         </NavLink>
-        <span style={{ marginLeft: 'auto' }}>
-          {user !== null && <span style={{ marginRight: '0.75rem' }}>{user.username}</span>}
-          <button type="button" onClick={handleLogout}>
+        <span className="nav-spacer">
+          {user !== null && <span className="nav-user">{user.username}</span>}
+          <button type="button" className="btn-ghost" onClick={handleLogout}>
             Sign out
           </button>
         </span>

@@ -1,6 +1,6 @@
 import { request } from './client'
 
-/** Social visibility endpoints (spec §2.7): activity feed + member shelves. */
+/** Social visibility endpoints: activity feed + member shelves. */
 
 export interface FeedUser {
   id: number
@@ -57,7 +57,7 @@ export function fetchMembers(): Promise<Member[]> {
 export type LibraryTypeFilter = 'TV' | 'BOOK'
 export type LibraryStatusFilter = 'WATCHING' | 'READING' | 'COMPLETED' | 'PLAN_TO'
 
-/** Same shape as the owner's library items (spec §2.7). */
+/** Same shape as the owner's library items. */
 export interface MemberLibraryItem {
   id: number
   type: 'TV' | 'BOOK'

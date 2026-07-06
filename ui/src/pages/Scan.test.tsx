@@ -60,7 +60,7 @@ describe('Scan page — secure-context gate (E6)', () => {
     expect(screen.getByText(/tailscale https address/i)).toBeInTheDocument()
     // The manual ISBN fallback is always available.
     expect(screen.getByLabelText('ISBN')).toBeInTheDocument()
-    // Hard rule 10: the camera must not be initialized off a secure context.
+    // The camera must not be initialized off a secure context.
     expect(camera.constructed).toBe(0)
   })
 

@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<BookStatus, string> = {
 }
 
 /**
- * Confirm card for a scanned book (spec §2.5 step 4): cover, title, author and a
+ * Confirm card for a scanned book: cover, title, author and a
  * status choice, then POST /api/books/track. A 409 already_tracked is reported
  * as an informational message rather than a hard error (E16).
  */
@@ -54,47 +54,37 @@ export default function BookConfirmCard({ book, onDone }: BookConfirmCardProps) 
   const coverSrc = book.coverPath !== '' ? `/images/${book.coverPath}` : null
 
   return (
-    <section aria-label="Confirm book" style={{ maxWidth: '28rem', margin: '0 auto' }}>
-      <div style={{ display: 'flex', gap: '1rem' }}>
+    <section aria-label="Confirm book" className="card" style={{ maxWidth: '28rem', margin: '0 auto' }}>
+      <div className="card-row" style={{ alignItems: 'flex-start' }}>
         {coverSrc !== null ? (
-          <img src={coverSrc} alt={`Cover of ${book.title}`} width={96} height={144} />
+          <img src={coverSrc} alt={`Cover of ${book.title}`} width={96} height={144} className="poster" />
         ) : (
-          <div
-            aria-hidden="true"
-            style={{
-              width: 96,
-              height: 144,
-              background: '#e5e7eb',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.75rem',
-              color: '#6b7280',
-            }}
-          >
+          <div aria-hidden="true" className="poster placeholder" style={{ width: 96, height: 144, fontSize: '0.75rem' }}>
             No cover
           </div>
         )}
-        <div>
-          <h2 style={{ margin: '0 0 0.25rem' }}>{book.title}</h2>
+        <div className="grow">
+          <h2>{book.title}</h2>
           {book.authors !== '' && <p style={{ margin: 0 }}>{book.authors}</p>}
-          <p style={{ margin: '0.25rem 0', color: '#6b7280', fontSize: '0.875rem' }}>
-            ISBN {book.isbn13}
-          </p>
+          <p className="meta" style={{ marginTop: '0.25rem' }}>ISBN {book.isbn13}</p>
         </div>
       </div>
 
       {tracked ? (
-        <div>
-          <p role="status">{notice ?? `Added to your shelf as “${STATUS_LABELS[status]}”.`}</p>
-          <button type="button" onClick={onDone}>
-            Scan another
-          </button>
+        <div className="stack" style={{ marginTop: '1rem' }}>
+          <p role="status" className="notice">
+            {notice ?? `Added to your shelf as “${STATUS_LABELS[status]}”.`}
+          </p>
+          <div>
+            <button type="button" className="btn-ghost" onClick={onDone}>
+              Scan another
+            </button>
+          </div>
         </div>
       ) : (
-        <div style={{ marginTop: '1rem' }}>
-          <label>
-            Status{' '}
+        <div className="stack" style={{ marginTop: '1rem' }}>
+          <label className="field">
+            <span>Status</span>
             <select
               aria-label="Status"
               value={status}
@@ -108,15 +98,15 @@ export default function BookConfirmCard({ book, onDone }: BookConfirmCardProps) 
             </select>
           </label>
           {error !== null && (
-            <p role="alert" style={{ color: 'crimson' }}>
+            <p role="alert" className="alert">
               {error}
             </p>
           )}
-          <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem' }}>
-            <button type="button" onClick={handleTrack} disabled={submitting}>
+          <div className="cluster">
+            <button type="button" className="btn-confirm" onClick={handleTrack} disabled={submitting}>
               {submitting ? 'Adding…' : 'Add to shelf'}
             </button>
-            <button type="button" onClick={onDone} disabled={submitting}>
+            <button type="button" className="btn-ghost" onClick={onDone} disabled={submitting}>
               Cancel
             </button>
           </div>

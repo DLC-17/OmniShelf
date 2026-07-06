@@ -26,9 +26,9 @@ export default function ManualIsbnForm({ initialIsbn = '', onSubmit, busy = fals
   }
 
   return (
-    <form onSubmit={handleSubmit}>
-      <label>
-        ISBN{' '}
+    <form className="searchbar" onSubmit={handleSubmit}>
+      <label className="field grow">
+        <span>ISBN</span>
         <input
           type="text"
           inputMode="numeric"
@@ -37,9 +37,10 @@ export default function ManualIsbnForm({ initialIsbn = '', onSubmit, busy = fals
           value={isbn}
           onChange={(e) => setIsbn(e.target.value)}
           disabled={busy}
+          style={{ flex: 1 }}
         />
-      </label>{' '}
-      <button type="submit" disabled={busy || isbn.trim() === ''}>
+      </label>
+      <button type="submit" className="btn-primary" disabled={busy || isbn.trim() === ''}>
         {busy ? 'Looking up…' : 'Look up'}
       </button>
     </form>

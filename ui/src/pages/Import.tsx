@@ -9,7 +9,7 @@ import {
   type ImportJob,
 } from '../api/imports'
 
-/** Poll cadence while the backend chews through the upload (spec §2.4). */
+/** Poll cadence while the backend chews through the upload. */
 const POLL_INTERVAL_MS = 1000
 
 function uploadErrorMessage(err: unknown): string {
@@ -41,7 +41,7 @@ interface UnresolvedFormProps {
 }
 
 /**
- * Manual resolution for titles TMDB could not match (spec §2.4 step 5, E8):
+ * Manual resolution for titles TMDB could not match:
  * one TMDB show ID input per title; only filled-in rows are submitted.
  */
 function UnresolvedForm({ jobId, unresolved }: UnresolvedFormProps) {
@@ -84,25 +84,24 @@ function UnresolvedForm({ jobId, unresolved }: UnresolvedFormProps) {
         These shows could not be matched automatically. Look each one up on TMDB and enter its
         show ID to finish importing it — or leave it blank to skip.
       </p>
-      <ul style={{ listStyle: 'none', padding: 0 }}>
+      <ul className="list">
         {unresolved.map((title) => (
-          <li key={title} style={{ padding: '0.25rem 0' }}>
-            <label>
-              {title}{' '}
-              <input
-                type="text"
-                inputMode="numeric"
-                placeholder="TMDB ID"
-                value={inputs[title] ?? ''}
-                onChange={(e) => setInputs((prev) => ({ ...prev, [title]: e.target.value }))}
-              />
-            </label>
+          <li key={title} className="card card-row wrap">
+            <span className="grow">{title}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder="TMDB ID"
+              aria-label={`TMDB ID for ${title}`}
+              value={inputs[title] ?? ''}
+              onChange={(e) => setInputs((prev) => ({ ...prev, [title]: e.target.value }))}
+            />
           </li>
         ))}
       </ul>
-      {validationError !== null && <p role="alert">{validationError}</p>}
-      {mutation.isError && <p role="alert">{resolveErrorMessage(mutation.error)}</p>}
-      <button type="submit" disabled={mutation.isPending}>
+      {validationError !== null && <p role="alert" className="alert">{validationError}</p>}
+      {mutation.isError && <p role="alert" className="alert">{resolveErrorMessage(mutation.error)}</p>}
+      <button type="submit" className="btn-primary" disabled={mutation.isPending}>
         {mutation.isPending ? 'Resolving…' : 'Resolve titles'}
       </button>
     </form>
@@ -129,15 +128,15 @@ function JobProgress({ jobId }: JobProgressProps) {
   })
 
   if (isPending) {
-    return <p>Checking import status…</p>
+    return <p className="muted">Checking import status…</p>
   }
   if (isError) {
-    return <p role="alert">Could not fetch import status. Try reloading.</p>
+    return <p role="alert" className="alert">Could not fetch import status. Try reloading.</p>
   }
 
   if (isImportJobActive(job.status)) {
     return (
-      <div>
+      <div className="stack">
         <p>
           Importing… {job.processed} / {job.total} shows processed
           {job.skipped > 0 && ` (${job.skipped} malformed rows skipped)`}
@@ -149,7 +148,7 @@ function JobProgress({ jobId }: JobProgressProps) {
 
   if (job.status === 'FAILED') {
     return (
-      <p role="alert">
+      <p role="alert" className="alert">
         Import failed: {job.error !== undefined && job.error !== '' ? job.error : 'unknown error'}
       </p>
     )
@@ -158,7 +157,7 @@ function JobProgress({ jobId }: JobProgressProps) {
   // DONE
   return (
     <div>
-      <p>
+      <p className="notice">
         Import complete: {job.processed} / {job.total} shows processed
         {job.skipped > 0 && `, ${job.skipped} malformed rows skipped`}
         {job.unresolved.length > 0 && `, ${job.unresolved.length} titles need manual resolution`}.
@@ -173,7 +172,7 @@ function JobProgress({ jobId }: JobProgressProps) {
 }
 
 /**
- * TV Time import wizard (spec §2.4): upload the export → poll job progress →
+ * TV Time import wizard: upload the export → poll job progress →
  * resolve any unmatched titles manually.
  */
 export default function Import() {
@@ -200,26 +199,29 @@ export default function Import() {
       </p>
 
       {jobId === null ? (
-        <form onSubmit={handleSubmit}>
-          <label>
-            Export files{' '}
+        <form className="stack" onSubmit={handleSubmit} style={{ maxWidth: '32rem' }}>
+          <label className="field">
+            <span>Export files</span>
             <input
               type="file"
               accept=".csv,.zip"
               multiple
               onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
             />
-          </label>{' '}
-          <button type="submit" disabled={files.length === 0 || upload.isPending}>
-            {upload.isPending ? 'Uploading…' : 'Start import'}
-          </button>
-          {upload.isError && <p role="alert">{uploadErrorMessage(upload.error)}</p>}
+          </label>
+          <div>
+            <button type="submit" className="btn-primary" disabled={files.length === 0 || upload.isPending}>
+              {upload.isPending ? 'Uploading…' : 'Start import'}
+            </button>
+          </div>
+          {upload.isError && <p role="alert" className="alert">{uploadErrorMessage(upload.error)}</p>}
         </form>
       ) : (
         <>
           <JobProgress jobId={jobId} />
           <button
             type="button"
+            className="btn-ghost"
             onClick={() => {
               setJobId(null)
               setFiles([])

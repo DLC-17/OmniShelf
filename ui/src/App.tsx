@@ -44,7 +44,7 @@ function UnauthorizedRedirect() {
 function RequireAuth() {
   const { user, isLoading } = useAuth()
   if (isLoading) {
-    return <p style={{ textAlign: 'center', paddingTop: '4rem' }}>Loading…</p>
+    return <p className="page-loading">Loading…</p>
   }
   if (user === null) {
     return <Navigate to="/login" replace />
@@ -56,7 +56,7 @@ function RequireAuth() {
 function RedirectIfAuthed() {
   const { user, isLoading } = useAuth()
   if (isLoading) {
-    return <p style={{ textAlign: 'center', paddingTop: '4rem' }}>Loading…</p>
+    return <p className="page-loading">Loading…</p>
   }
   if (user !== null) {
     return <Navigate to="/" replace />
