@@ -15,7 +15,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/models"
 )
 
-// bcryptCost is fixed at 12 (spec §2.1).
+// bcryptCost is fixed at 12.
 const bcryptCost = 12
 
 // minPasswordLen is the minimum accepted password length.
@@ -51,7 +51,7 @@ type userResponse struct {
 	Username string `json:"username"`
 }
 
-// register handles POST /api/auth/register (spec §2.1 step 2).
+// register handles POST /api/auth/register.
 func (a *authHandler) register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -86,7 +86,7 @@ func (a *authHandler) register(c *gin.Context) {
 	}
 }
 
-// login handles POST /api/auth/login (spec §2.1 step 3).
+// login handles POST /api/auth/login.
 func (a *authHandler) login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

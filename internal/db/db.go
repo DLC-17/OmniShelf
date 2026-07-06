@@ -1,6 +1,5 @@
 // Package db owns the single SQLite connection for OmniShelf.
-// WAL pragmas and pool settings are configured here and nowhere else
-// (.ai/architecture.md hard rule 1).
+// WAL pragmas and pool settings are configured here and nowhere else.
 package db
 
 import (

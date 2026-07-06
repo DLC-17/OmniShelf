@@ -19,7 +19,7 @@ const inviteCodeLen = 16
 const inviteAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 
 // runInvite implements `omnishelf invite create`: generates a single-use
-// registration code, stores it, and prints it (spec §2.1 step 1).
+// registration code, stores it, and prints it.
 func runInvite(args []string) {
 	if len(args) != 1 || args[0] != "create" {
 		fmt.Fprintln(os.Stderr, "usage: omnishelf invite create")

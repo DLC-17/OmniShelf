@@ -2,8 +2,8 @@
 //
 // Remote posters/covers are downloaded to {root}/{kind}/{externalID}.jpg via
 // a temp file in the same directory followed by os.Rename, so a failed
-// download never leaves a partial file behind (spec §2.8, E13). Only the
-// relative path is returned for storage in the database (hard rule 5).
+// download never leaves a partial file behind. Only the
+// relative path is returned for storage in the database.
 package images
 
 import (

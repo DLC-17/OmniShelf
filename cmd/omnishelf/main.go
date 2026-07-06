@@ -59,7 +59,7 @@ func runServer() error {
 	}
 
 	// Imports left RUNNING by an unclean shutdown can never finish; mark
-	// them FAILED before serving so their owners see it (spec E10).
+	// them FAILED before serving so their owners see it.
 	if err := importer.MarkInterrupted(gdb); err != nil {
 		return fmt.Errorf("marking interrupted imports: %w", err)
 	}
@@ -68,7 +68,7 @@ func runServer() error {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 
-	// Shared external clients and image cache (hard rules 3–5).
+	// Shared external clients and image cache.
 	tmdbClient := tmdb.New(cfg.TMDBAPIKey)
 	olClient := openlibrary.New(cfg.ContactEmail)
 	imageStore := images.New(cfg.ImagesDir)
@@ -94,7 +94,7 @@ func runServer() error {
 	api.RegisterFeedRoutes(protected, gdb)
 	api.RegisterUserRoutes(protected, gdb)
 
-	// Nightly TMDB sync at 03:00 (spec §2.3).
+	// Nightly TMDB sync at 03:00.
 	engine := syncengine.New(gdb, tmdbClient, imageStore)
 	scheduler := cron.New()
 	if err := engine.Schedule(scheduler); err != nil {
@@ -102,7 +102,7 @@ func runServer() error {
 	}
 	scheduler.Start()
 
-	// Cached artwork straight off the images volume (hard rule 5).
+	// Cached artwork straight off the images volume.
 	router.StaticFS("/images", gin.Dir(cfg.ImagesDir, false))
 
 	// API routes are registered by later tasks; an unknown /api path must be a

@@ -17,7 +17,7 @@ import (
 // (.ai/architecture.md: HttpOnly + SameSite=Lax, named omnishelf_token).
 const CookieName = "omnishelf_token"
 
-// tokenTTL is the JWT lifetime (spec §2.1: 7-day expiry).
+// tokenTTL is the JWT lifetime (7-day expiry).
 const tokenTTL = 7 * 24 * time.Hour
 
 // userIDKey is the Gin context key under which the authenticated user's ID
@@ -27,7 +27,7 @@ const userIDKey = "omnishelf_user_id"
 // RegisterRoutes wires the auth endpoints and returns the JWT-protected
 // /api route group. Later tasks (tv, books, feed, ...) attach their routes
 // to the returned group so every /api route except /api/auth/login and
-// /api/auth/register is guarded by the auth middleware (hard rule 7).
+// /api/auth/register is guarded by the auth middleware.
 func RegisterRoutes(r *gin.Engine, gdb *gorm.DB, cfg *config.Config) *gin.RouterGroup {
 	secret := []byte(cfg.JWTSecret)
 	a := &authHandler{db: gdb, secret: secret}

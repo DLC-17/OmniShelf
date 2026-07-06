@@ -19,7 +19,7 @@ const (
 
 // Error writes the uniform API error envelope
 // {"error": "<machine_code>", "message": "<human text>"} with the given
-// HTTP status (project_spec.md §4, .ai/architecture.md hard rule 8).
+// HTTP status.
 func Error(c *gin.Context, status int, code, message string) {
 	c.JSON(status, gin.H{"error": code, "message": message})
 }

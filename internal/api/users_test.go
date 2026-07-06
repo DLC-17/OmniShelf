@@ -72,8 +72,8 @@ func TestUsersRequiresAuth(t *testing.T) {
 	}
 }
 
-// TestUserLibraryReadOnlyView: alice reads bob's shelf (hard rule 7 allows
-// cross-user reads), with type/status filters, same shape as /api/library.
+// TestUserLibraryReadOnlyView: alice reads bob's shelf (cross-user reads are
+// allowed), with type/status filters, same shape as /api/library.
 func TestUserLibraryReadOnlyView(t *testing.T) {
 	r, gdb := socialTestRouter(t)
 	_, aliceCookie := socialSeedUser(t, gdb, "alice")
@@ -134,7 +134,7 @@ func TestUserLibraryUnknownUser(t *testing.T) {
 }
 
 // TestUsersRoutesAreReadOnly asserts no mutating verbs are routed under
-// /api/users (spec §2.7: visibility only; writes stay own-account).
+// /api/users (visibility only; writes stay own-account).
 func TestUsersRoutesAreReadOnly(t *testing.T) {
 	r, gdb := socialTestRouter(t)
 	bob, cookie := socialSeedUser(t, gdb, "bob")

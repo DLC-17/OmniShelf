@@ -20,8 +20,8 @@ const codeUserNotFound = "user_not_found"
 type usersHandler struct{ db *gorm.DB }
 
 // RegisterUserRoutes attaches the read-only member endpoints to the
-// JWT-protected /api group (spec §2.7). Deliberately no mutating routes:
-// cross-user visibility is read-only (hard rule 7).
+// JWT-protected /api group. Deliberately no mutating routes:
+// cross-user visibility is read-only.
 func RegisterUserRoutes(grp *gin.RouterGroup, gdb *gorm.DB) {
 	h := &usersHandler{db: gdb}
 	grp.GET("/users", h.list)
@@ -81,7 +81,7 @@ func (h *usersHandler) list(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// userLibraryItem mirrors the owner library item shape (spec §2.7: "same
+// userLibraryItem mirrors the owner library item shape ("same
 // shape as own library endpoint").
 type userLibraryItem struct {
 	ID         uint      `json:"id"`

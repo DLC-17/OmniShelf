@@ -13,7 +13,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Feed pagination bounds (spec §2.7: cursor-paginated).
+// Feed pagination bounds (cursor-paginated).
 const (
 	feedDefaultLimit = 20
 	feedMaxLimit     = 100
@@ -35,9 +35,9 @@ const feedCursorSep = "|"
 type feedHandler struct{ db *gorm.DB }
 
 // RegisterFeedRoutes attaches GET /feed to the JWT-protected /api group.
-// The feed is a read-only, cross-user view (hard rule 7) derived entirely
+// The feed is a read-only, cross-user view derived entirely
 // from existing timestamps — EpisodeWatch.WatchedAt and
-// TrackingItem.UpdatedAt — with no separate activity table (spec §2.7).
+// TrackingItem.UpdatedAt — with no separate activity table.
 func RegisterFeedRoutes(grp *gin.RouterGroup, gdb *gorm.DB) {
 	h := &feedHandler{db: gdb}
 	grp.GET("/feed", h.list)
@@ -94,8 +94,7 @@ type feedCursor struct {
 	id   uint
 }
 
-// parseFeedCursor accepts either a bare RFC3339 timestamp (spec §2.7 —
-// entries strictly before it) or the composite cursor this endpoint emits.
+// parseFeedCursor accepts either a bare RFC3339 timestamp (entries strictly before it) or the composite cursor this endpoint emits.
 func parseFeedCursor(raw string) (*feedCursor, error) {
 	if raw == "" {
 		return nil, nil
@@ -280,7 +279,7 @@ func (h *feedHandler) itemEntries(ctx context.Context, cur *feedCursor, limit in
 }
 
 // feedItemAction phrases a tracking-item event from its type and status
-// (spec §2.7: items added, statuses changed, books finished).
+// (items added, statuses changed, books finished).
 func feedItemAction(mediaType, status, title string) string {
 	switch mediaType {
 	case "TV":

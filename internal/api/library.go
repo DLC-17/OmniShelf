@@ -12,7 +12,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/models"
 )
 
-// libraryHandler serves the unified shelf endpoints (spec §2.6):
+// libraryHandler serves the unified shelf endpoints:
 // GET /api/library, PATCH /api/items/:id, DELETE /api/items/:id.
 type libraryHandler struct {
 	svc *books.Service

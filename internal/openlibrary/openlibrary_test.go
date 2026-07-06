@@ -71,7 +71,7 @@ func TestGetByISBNFullRecord(t *testing.T) {
 	assert.Equal(t, 8739161, book.CoverID, "edition cover wins over work cover")
 	assert.Equal(t, "/works/OL45804W", book.WorkKey)
 
-	// Hard rule 4: every single request must carry the mandatory User-Agent.
+	// Every single request must carry the mandatory User-Agent.
 	got := agents()
 	require.Len(t, got, 3, "edition + work + author requests")
 	for _, ua := range got {

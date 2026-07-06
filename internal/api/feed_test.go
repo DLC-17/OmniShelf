@@ -164,7 +164,7 @@ func TestFeedMergesUsersReverseChronological(t *testing.T) {
 			"entry %d is newer than entry %d", i, i-1)
 	}
 
-	// Both users appear; entry fields are populated per spec §2.7.
+	// Both users appear; entry fields are populated.
 	first := page.Entries[0]
 	assert.Equal(t, u1, first.User.ID)
 	assert.Equal(t, "alice", first.User.Username)
@@ -207,7 +207,7 @@ func TestFeedCursorPagination(t *testing.T) {
 	assert.Equal(t, want, paged, "pages must concatenate to the full feed with no duplicates or gaps")
 }
 
-// TestFeedBareTimestampCursor uses a plain RFC3339 `before` (spec §2.7):
+// TestFeedBareTimestampCursor uses a plain RFC3339 `before`:
 // entries strictly before that instant — the whole tie cluster is excluded.
 func TestFeedBareTimestampCursor(t *testing.T) {
 	r, gdb := socialTestRouter(t)

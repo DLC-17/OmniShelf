@@ -1,9 +1,9 @@
 // Package openlibrary provides a client for OpenLibrary ISBN lookups.
 //
 // Every request carries the mandatory User-Agent
-// "OmniShelf/1.0 (<contact email>)" (architecture hard rule 4). Lookups
+// "OmniShelf/1.0 (<contact email>)". Lookups
 // return whatever metadata exists — missing works, authors or covers never
-// block a result (spec E5). A missing ISBN yields ErrNotFound (spec E4).
+// block a result. A missing ISBN yields ErrNotFound.
 package openlibrary
 
 import (
@@ -181,7 +181,7 @@ func (c *Client) GetByISBN(ctx context.Context, isbn string) (*Book, error) {
 
 // CoverURL returns the covers.openlibrary.org URL for a cover ID at the
 // given size ("S", "M" or "L"). The actual download must go through
-// internal/images — never hotlink this URL from the frontend (hard rule 5).
+// internal/images — never hotlink this URL from the frontend.
 // Returns "" when the book has no known cover.
 func (c *Client) CoverURL(coverID int, size string) string {
 	if coverID == 0 {

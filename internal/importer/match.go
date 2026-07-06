@@ -9,7 +9,7 @@ import (
 
 // matchThreshold is the minimum normalized Levenshtein similarity for a
 // fuzzy title match; anything below lands in the UNRESOLVED bucket for
-// manual review (spec §2.4, E8).
+// manual review.
 const matchThreshold = 0.6
 
 // normalizeTitle lowercases a title, replaces punctuation with spaces, and
@@ -28,7 +28,7 @@ func normalizeTitle(s string) string {
 
 // chooseMatch picks a TMDB ID for a title from search results: an exact
 // normalized-title match wins; otherwise the highest fuzzy similarity above
-// matchThreshold; otherwise 0 (unresolved, spec E8).
+// matchThreshold; otherwise 0 (unresolved).
 func chooseMatch(title string, results []tmdb.SearchResult) int {
 	norm := normalizeTitle(title)
 	if norm == "" {

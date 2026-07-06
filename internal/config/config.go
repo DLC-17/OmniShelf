@@ -1,5 +1,5 @@
-// Package config loads OmniShelf configuration from environment variables
-// (project_spec.md §1.3). Configuration comes from env vars only.
+// Package config loads OmniShelf configuration from environment variables.
+// Configuration comes from env vars only.
 package config
 
 import (

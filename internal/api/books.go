@@ -61,7 +61,7 @@ func toBookResponse(b *models.Book) bookResponse {
 	}
 }
 
-// scan handles POST /api/books/scan {isbn} (spec §2.5 step 3).
+// scan handles POST /api/books/scan {isbn}.
 func (h *booksHandler) scan(c *gin.Context) {
 	var req scanRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.ISBN == "" {
@@ -89,8 +89,8 @@ func (h *booksHandler) scan(c *gin.Context) {
 	}
 }
 
-// track handles POST /api/books/track {bookId, status} (spec §2.5 step 4).
-// The tracking item is always created for the JWT user (hard rule 7).
+// track handles POST /api/books/track {bookId, status}.
+// The tracking item is always created for the JWT user.
 func (h *booksHandler) track(c *gin.Context) {
 	var req trackRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.BookID == 0 {

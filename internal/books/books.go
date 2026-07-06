@@ -5,7 +5,7 @@
 // this package's sentinel errors into the standard envelope.
 //
 // Every mutating operation is scoped by the caller-supplied userID, which
-// handlers take from the JWT — never from client input (hard rule 7). Items
+// handlers take from the JWT — never from client input. Items
 // belonging to another user surface as ErrItemNotFound so their existence is
 // not leaked.
 package books
@@ -32,7 +32,7 @@ const (
 	TypeBook = "BOOK"
 )
 
-// Tracking statuses (spec §3). Books use READING; TV uses WATCHING.
+// Tracking statuses. Books use READING; TV uses WATCHING.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
@@ -99,10 +99,10 @@ func NewService(gdb *gorm.DB, metadata MetadataClient, images ImageStore) *Servi
 	}
 }
 
-// Scan looks an ISBN up on OpenLibrary and upserts the shared Book cache row
-// (spec §2.5). Partial metadata is saved as-is (E5); a failed cover download
-// is logged and leaves CoverPath empty for the nightly retry (E13). An ISBN
-// unknown to OpenLibrary yields ErrNotFound (E4).
+// Scan looks an ISBN up on OpenLibrary and upserts the shared Book cache row.
+// Partial metadata is saved as-is; a failed cover download
+// is logged and leaves CoverPath empty for the nightly retry. An ISBN
+// unknown to OpenLibrary yields ErrNotFound.
 func (s *Service) Scan(ctx context.Context, isbn string) (*models.Book, error) {
 	norm, err := normalizeISBN13(isbn)
 	if err != nil {
@@ -175,9 +175,8 @@ func (s *Service) upsertBook(ctx context.Context, book *models.Book) error {
 	return nil
 }
 
-// Track creates the user's TrackingItem for a scanned book (spec §2.5
-// step 4). A duplicate returns the existing item alongside ErrAlreadyTracked
-// so the API can answer 409 with it (E16).
+// Track creates the user's TrackingItem for a scanned book. A duplicate returns the existing item
+// alongside ErrAlreadyTracked so the API can answer 409 with it.
 func (s *Service) Track(ctx context.Context, userID, bookID uint, status string) (*models.TrackingItem, error) {
 	if !validStatus(TypeBook, status) {
 		return nil, fmt.Errorf("%w: %q is not valid for books", ErrInvalidStatus, status)
@@ -215,7 +214,7 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 }
 
 // ListItems returns the user's tracking items, optionally filtered by type
-// ("TV"/"BOOK") and status, newest activity first (spec §2.6).
+// ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
 	if typ != "" && typ != TypeTV && typ != TypeBook {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
@@ -239,8 +238,8 @@ func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string
 	return items, nil
 }
 
-// UpdateItem patches status and/or progress on the user's tracking item
-// (spec §2.6). Status must be valid for the item's media type; progress is a
+// UpdateItem patches status and/or progress on the user's tracking item.
+// Status must be valid for the item's media type; progress is a
 // page number and only meaningful for books (TV progress is derived from
 // EpisodeWatch rows, never stored).
 func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress *int) (*models.TrackingItem, error) {
@@ -275,7 +274,7 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 	return item, nil
 }
 
-// DeleteItem untracks an item for the user (spec §2.6). For TV items the
+// DeleteItem untracks an item for the user. For TV items the
 // user's EpisodeWatch rows for that show are removed too; shared Show, Book,
 // and Episode metadata is always kept.
 func (s *Service) DeleteItem(ctx context.Context, userID, itemID uint) error {
@@ -326,7 +325,7 @@ func deleteShowWatches(tx *gorm.DB, userID uint, externalID string) error {
 }
 
 // userItem loads a tracking item scoped to the user. Someone else's item is
-// indistinguishable from a missing one (hard rule 7 — no existence leak).
+// indistinguishable from a missing one (no existence leak).
 func (s *Service) userItem(ctx context.Context, userID, itemID uint) (*models.TrackingItem, error) {
 	var item models.TrackingItem
 	err := s.db.WithContext(ctx).Where("id = ? AND user_id = ?", itemID, userID).First(&item).Error

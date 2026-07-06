@@ -10,8 +10,7 @@ import (
 
 // RegisterHealthRoutes wires the unauthenticated liveness/readiness probe.
 // It is attached to the bare engine — NOT the JWT-protected group — so the
-// Docker HEALTHCHECK and TrueNAS can reach it without a session cookie
-// (.ai/testing_and_health.md "Container health").
+// Docker HEALTHCHECK and TrueNAS can reach it without a session cookie.
 func RegisterHealthRoutes(r *gin.Engine, gdb *gorm.DB, imagesDir string) {
 	h := &healthHandler{db: gdb, imagesDir: imagesDir}
 	r.GET("/api/health", h.check)
@@ -25,7 +24,7 @@ type healthHandler struct {
 // check performs a 1-row SQLite ping and verifies the images directory is a
 // reachable, mounted volume. Both healthy → 200 {"status":"ok","db":"ok"};
 // either unavailable → 503 with a human-readable detail so the failure shows
-// up in the container logs / orchestrator (spec E1/E14).
+// up in the container logs.
 func (h *healthHandler) check(c *gin.Context) {
 	if err := h.pingDB(); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{

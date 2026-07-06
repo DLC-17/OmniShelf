@@ -1,5 +1,4 @@
-// Package sync implements the nightly TMDB synchronization engine
-// (project_spec.md §2.3).
+// Package sync implements the nightly TMDB synchronization engine.
 //
 // A run sweeps every show any user is WATCHING or PLAN_TO, refreshes show
 // metadata and episode listings from TMDB, retries missing artwork, and
@@ -116,7 +115,7 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 		return ErrSkipped
 	}
 	defer func() {
-		// Background work must never crash the process (hard rule 9).
+		// Background work must never crash the process.
 		if r := recover(); r != nil {
 			log.Printf("sync: recovered from panic: %v", r)
 			err = fmt.Errorf("sync: panic during run: %v", r)
@@ -139,7 +138,7 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 			break
 		}
 		if showErr := e.syncShow(ctx, id); showErr != nil {
-			// One failing show never aborts the run (spec §2.3.4).
+			// One failing show never aborts the run.
 			log.Printf("sync: show %d: %v", id, showErr)
 			runErrors = append(runErrors, fmt.Sprintf("show %d: %v", id, showErr))
 			continue

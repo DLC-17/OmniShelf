@@ -372,7 +372,7 @@ func TestJobIsOwnerScoped(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, rec.Code, "other users' jobs are invisible")
 }
 
-// While the shared background-job lock (spec E18) is held by the sync
+// While the shared background-job lock is held by the sync
 // engine, an import stays PENDING and retries; once the lock frees, it runs.
 func TestImportWaitsForBusyLockThenRuns(t *testing.T) {
 	e := newEnv(t)

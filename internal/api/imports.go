@@ -24,10 +24,10 @@ const (
 // maxUploadBytes caps the total size of an import upload (raw CSVs or zip).
 const maxUploadBytes = 64 << 20 // 64 MiB
 
-// RegisterImportRoutes attaches the TV Time import endpoints (spec §2.4) to
+// RegisterImportRoutes attaches the TV Time import endpoints to
 // the JWT-guarded /api group returned by RegisterRoutes. Wired from main by
 // the orchestrator, which must also call importer.MarkInterrupted(db) at
-// startup (spec E10).
+// startup.
 func RegisterImportRoutes(grp *gin.RouterGroup, imp *importer.Importer) {
 	h := &importHandler{imp: imp}
 	grp.POST("/tv/import", h.create)
@@ -39,8 +39,8 @@ type importHandler struct {
 	imp *importer.Importer
 }
 
-// jobDTO is the progress-polling payload (spec §2.4 step 4, plus the
-// malformed-row skip count from E9).
+// jobDTO is the progress-polling payload (plus the
+// malformed-row skip count).
 type jobDTO struct {
 	JobID      uint     `json:"jobId"`
 	Status     string   `json:"status"`
@@ -66,7 +66,7 @@ func toJobDTO(job *models.ImportJob, skipped int, unresolved []string) jobDTO {
 // create handles POST /api/tv/import: multipart upload of followed_shows.csv
 // and/or seen_episodes.csv, raw or zipped. Header rows are validated before
 // any job is created (400, spec E9); on success a PENDING ImportJob is
-// created and {jobId} returned immediately (spec §2.4 step 2).
+// created and {jobId} returned immediately.
 func (h *importHandler) create(c *gin.Context) {
 	userID := CurrentUserID(c)
 
@@ -138,7 +138,7 @@ func (h *importHandler) status(c *gin.Context) {
 	c.JSON(http.StatusOK, toJobDTO(job, skipped, unresolved))
 }
 
-// resolveRequest maps unresolved titles to TMDB show IDs (spec §2.4 step 5).
+// resolveRequest maps unresolved titles to TMDB show IDs.
 type resolveRequest struct {
 	Mappings map[string]int `json:"mappings"`
 }

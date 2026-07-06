@@ -294,7 +294,7 @@ func TestPatchItemEndpoint(t *testing.T) {
 	w = doJSON(r, http.MethodPatch, path, map[string]any{}, cookie)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 
-	// Cross-user PATCH → 404, existence not leaked (hard rule 7).
+	// Cross-user PATCH → 404, existence not leaked.
 	w = doJSON(r, http.MethodPatch, path, map[string]any{"status": "PLAN_TO"}, otherCookie)
 	require.Equal(t, http.StatusNotFound, w.Code)
 	assertEnvelope(t, w, CodeNotFound)

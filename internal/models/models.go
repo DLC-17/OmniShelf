@@ -1,5 +1,4 @@
-// Package models defines the GORM data models for OmniShelf,
-// exactly as specified in project_spec.md §3.
+// Package models defines the GORM data models for OmniShelf.
 package models
 
 import "time"

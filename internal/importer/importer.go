@@ -1,4 +1,4 @@
-// Package importer implements the TV Time CSV import pipeline (spec §2.4).
+// Package importer implements the TV Time CSV import pipeline.
 //
 // Uploads are header-validated up front (400 pre-job, E9), then processed by
 // a background goroutine in chunks of 50 rows with progress persisted to the
@@ -38,7 +38,7 @@ const (
 )
 
 // chunkSize is the number of CSV rows processed between progress writes
-// (.ai/coding_standards.md: chunks of ~50 rows so restarts are diagnosable).
+// (chunks of ~50 rows so restarts are diagnosable).
 const chunkSize = 50
 
 // defaultImageBaseURL is the TMDB poster CDN prefix.
@@ -55,7 +55,7 @@ var (
 
 // Config configures an Importer. DB and TMDB are required; Images is
 // optional (posters are skipped when nil, and poster failures never fail an
-// import — spec E13).
+// import).
 type Config struct {
 	DB     *gorm.DB
 	TMDB   *tmdb.Client
@@ -67,7 +67,7 @@ type Config struct {
 	HTTPClient *http.Client
 
 	// LockRetry / LockWait tune how a PENDING job waits for the shared
-	// background-job lock (spec E18). Defaults: retry every 2s, give up
+	// background-job lock. Defaults: retry every 2s, give up
 	// after 15 minutes and mark the job FAILED.
 	LockRetry time.Duration
 	LockWait  time.Duration
@@ -132,7 +132,7 @@ func New(cfg Config) *Importer {
 }
 
 // MarkInterrupted flips jobs stuck RUNNING (a container restart killed their
-// goroutine) to FAILED "interrupted" (spec E10). Call once at startup before
+// goroutine) to FAILED "interrupted". Call once at startup before
 // serving traffic.
 func MarkInterrupted(db *gorm.DB) error {
 	res := db.Model(&models.ImportJob{}).
@@ -149,7 +149,7 @@ func MarkInterrupted(db *gorm.DB) error {
 
 // StartImport creates a PENDING ImportJob for the payload and launches the
 // background goroutine that processes it. It returns immediately with the
-// job so the handler can respond with {jobId} (spec §2.4).
+// job so the handler can respond with {jobId}.
 func (imp *Importer) StartImport(userID uint, p *Payload) (*models.ImportJob, error) {
 	job := &models.ImportJob{
 		UserID:     userID,
@@ -179,11 +179,11 @@ func (imp *Importer) JobStatus(jobID, userID uint) (*models.ImportJob, int, []st
 
 // Resolve imports the shows the user manually mapped (title → TMDB ID),
 // replays any seen-episode rows held for those titles, and removes them from
-// the job's unresolved list (spec §2.4 step 5).
+// the job's unresolved list.
 //
 // It takes the shared background-job lock non-blockingly; if the nightly
 // sync or another import holds it, ErrBusy is returned and the client should
-// retry (spec E18).
+// retry.
 func (imp *Importer) Resolve(jobID, userID uint, mappings map[string]int) (*models.ImportJob, error) {
 	job, err := imp.loadJob(jobID, userID)
 	if err != nil {
@@ -256,7 +256,7 @@ type runState struct {
 }
 
 // run processes an import job in a background goroutine, guarded by
-// recover() (.ai/architecture.md rule 9) and the shared job lock (E18).
+// recover() and the shared job lock.
 // If the lock is busy the job stays PENDING and acquisition is retried every
 // lockRetry until lockWait elapses, after which the job fails gracefully —
 // documented choice: bounded retry rather than unbounded waiting, so a wedged

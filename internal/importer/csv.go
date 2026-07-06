@@ -23,7 +23,7 @@ import (
 // A file whose header has a title column plus season AND episode columns is
 // treated as seen_episodes.csv; a file with a title column but no
 // season+episode pair is treated as followed_shows.csv. Anything else is
-// rejected up front with a 400 before any job is created (spec E9).
+// rejected up front with a 400 before any job is created.
 var (
 	titleHeaders   = []string{"tv_show_name", "show_name", "series_name", "show", "name", "title"}
 	seasonHeaders  = []string{"episode_season_number", "season_number", "season", "season_no"}
@@ -48,7 +48,7 @@ type UploadFile struct {
 
 // parsedFile is a classified CSV with its raw data records. Records are kept
 // raw here; per-row validation happens in the background job so malformed
-// data rows can be skipped and counted there (spec E9).
+// data rows can be skipped and counted there.
 type parsedFile struct {
 	name       string
 	kind       fileKind
@@ -69,7 +69,7 @@ type Payload struct {
 func (p *Payload) TotalRows() int { return p.totalRows }
 
 // ValidationError marks an upload rejected during up-front header
-// validation; the API layer maps it to HTTP 400 (spec E9).
+// validation; the API layer maps it to HTTP 400.
 type ValidationError struct{ msg string }
 
 func (e *ValidationError) Error() string { return e.msg }
@@ -153,7 +153,7 @@ func extractZip(f UploadFile) ([]UploadFile, error) {
 
 // parseCSV validates the header row and reads all data records. Records that
 // fail CSV parsing are kept as empty records so the background job counts
-// them as skipped malformed rows (spec E9) while Total stays accurate.
+// them as skipped malformed rows while Total stays accurate.
 func parseCSV(f UploadFile) (*parsedFile, error) {
 	r := csv.NewReader(bytes.NewReader(f.Data))
 	r.FieldsPerRecord = -1
