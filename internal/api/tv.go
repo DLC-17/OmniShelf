@@ -147,9 +147,16 @@ func (h *tvHandler) addShow(c *gin.Context) {
 	})
 }
 
-// upNext handles GET /api/tv/up-next.
+// upNext handles GET /api/tv/up-next?filter=recent|stale|unstarted. An unknown
+// or absent filter defaults to "recent" (watched in the last 14 days).
 func (h *tvHandler) upNext(c *gin.Context) {
-	entries, err := h.svc.UpNext(c.Request.Context(), CurrentUserID(c))
+	filter := tv.Recency(c.DefaultQuery("filter", string(tv.RecencyRecent)))
+	switch filter {
+	case tv.RecencyRecent, tv.RecencyStale, tv.RecencyUnstarted:
+	default:
+		filter = tv.RecencyRecent
+	}
+	entries, err := h.svc.UpNextByRecency(c.Request.Context(), CurrentUserID(c), filter)
 	if err != nil {
 		h.writeError(c, err)
 		return

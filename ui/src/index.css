@@ -293,6 +293,32 @@ button:disabled {
   font-size: 0.92rem;
 }
 
+/* ---------- Tabs ---------- */
+
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin: 0 0 1.15rem;
+}
+.tab {
+  padding: 0.4rem 0.85rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.tab:hover:not(:disabled) {
+  background: var(--cream);
+  border-color: var(--accent);
+}
+.tab.active {
+  background: var(--espresso);
+  border-color: var(--espresso);
+  color: var(--cream);
+}
+
 /* ---------- Cards & lists ---------- */
 
 .list {

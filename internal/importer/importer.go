@@ -335,6 +335,9 @@ func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string
 	}
 
 	switch f.kind {
+	case kindGoodreads:
+		return imp.importBookRow(f, rec, st)
+
 	case kindFollowed:
 		rs, ok := imp.resolveTitle(ctx, title, st)
 		if !ok {
@@ -462,6 +465,82 @@ func (imp *Importer) importShow(ctx context.Context, tmdbID int) (*models.Show, 
 		}
 	}
 	return &show, epIDs, nil
+}
+
+// importBookRow imports one Goodreads library row: it upserts the shared Book
+// (from the CSV's own title/author/pages — no network lookup, cover left for a
+// later rescan) and the user's BOOK tracking item, mapping the Goodreads shelf
+// to a status. Rows without a usable ISBN-13 are skipped and counted.
+func (imp *Importer) importBookRow(f *parsedFile, rec []string, st *runState) error {
+	isbn13 := cleanISBN(fieldAt(rec, f.isbn13Idx))
+	if len(isbn13) != 13 {
+		if alt := cleanISBN(fieldAt(rec, f.isbnIdx)); len(alt) == 13 {
+			isbn13 = alt
+		} else {
+			st.skipped++ // older titles often have no ISBN-13
+			return nil
+		}
+	}
+
+	title := fieldAt(rec, f.titleIdx)
+	author := fieldAt(rec, f.authorIdx)
+	pages, _ := strconv.Atoi(fieldAt(rec, f.pagesIdx))
+	if pages < 0 {
+		pages = 0
+	}
+	status := mapShelfStatus(fieldAt(rec, f.shelfIdx))
+
+	var book models.Book
+	if err := imp.db.Where(&models.Book{ISBN13: isbn13}).
+		Assign(map[string]any{"title": title, "authors": author, "page_count": pages}).
+		FirstOrCreate(&book).Error; err != nil {
+		return fmt.Errorf("upserting book %s: %w", isbn13, err)
+	}
+
+	progress := 0
+	if status == "COMPLETED" && pages > 0 {
+		progress = pages
+	}
+	item := models.TrackingItem{}
+	if err := imp.db.Where(&models.TrackingItem{
+		UserID: st.userID, Type: "BOOK", ExternalID: isbn13,
+	}).Attrs(map[string]any{
+		"title":    title,
+		"status":   status,
+		"progress": progress,
+	}).FirstOrCreate(&item).Error; err != nil {
+		return fmt.Errorf("upserting book tracking item %s: %w", isbn13, err)
+	}
+	return nil
+}
+
+// cleanISBN strips Goodreads' Excel armor (="…") plus hyphens and spaces,
+// keeping digits and a trailing X (ISBN-10 check char).
+func cleanISBN(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == 'X' || r == 'x':
+			b.WriteRune('X')
+		}
+	}
+	return b.String()
+}
+
+// mapShelfStatus maps a Goodreads "Exclusive Shelf" value to a tracking status.
+func mapShelfStatus(shelf string) string {
+	switch strings.ToLower(strings.TrimSpace(shelf)) {
+	case "read":
+		return "COMPLETED"
+	case "currently-reading", "currently_reading", "reading":
+		return "READING"
+	case "to-read", "to_read", "want-to-read":
+		return "PLAN_TO"
+	default:
+		return "READING"
+	}
 }
 
 // ensureTracking upserts the user's TrackingItem for a show against the

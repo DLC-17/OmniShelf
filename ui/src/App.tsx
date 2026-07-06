@@ -16,6 +16,7 @@ import Import from './pages/Import'
 import Library from './pages/Library'
 import Login from './pages/Login'
 import Scan from './pages/Scan'
+import Settings from './pages/Settings'
 import UpNext from './pages/UpNext'
 import UserLibrary from './pages/UserLibrary'
 
@@ -80,6 +81,7 @@ export function AppRoutes() {
             <Route path="/scan" element={<Scan />} />
             <Route path="/feed" element={<Feed />} />
             <Route path="/import" element={<Import />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/users/:id" element={<UserLibrary />} />
           </Route>
         </Route>

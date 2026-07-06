@@ -501,3 +501,38 @@ func TestWatchThroughIsIdempotent(t *testing.T) {
 		Where("user_id = ?", userID).Count(&count).Error)
 	assert.EqualValues(t, 3, count, "re-running watch-through does not duplicate rows")
 }
+
+// ── Up Next recency buckets ──
+
+func TestUpNextByRecencyBuckets(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+	s1e1 := episodeByNumber(t, gdb, res.Show.ID, 1, 1)
+
+	// Never watched → "unstarted".
+	unstarted, err := svc.UpNextByRecency(context.Background(), userID, RecencyUnstarted)
+	require.NoError(t, err)
+	require.Len(t, unstarted, 1)
+	recent, err := svc.UpNextByRecency(context.Background(), userID, RecencyRecent)
+	require.NoError(t, err)
+	assert.Empty(t, recent, "an unwatched show is not 'recent'")
+
+	// Watch S1E1 now → "recent".
+	_, err = svc.MarkWatched(context.Background(), userID, s1e1.ID)
+	require.NoError(t, err)
+	recent, err = svc.UpNextByRecency(context.Background(), userID, RecencyRecent)
+	require.NoError(t, err)
+	require.Len(t, recent, 1, "just-watched show is recent")
+	assert.Equal(t, 2, recent[0].Episode.Number, "still surfaces the next episode")
+
+	// Backdate the watch beyond the window → "stale".
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+		Where("user_id = ? AND episode_id = ?", userID, s1e1.ID).
+		Update("watched_at", time.Now().Add(-30*24*time.Hour)).Error)
+	stale, err := svc.UpNextByRecency(context.Background(), userID, RecencyStale)
+	require.NoError(t, err)
+	require.Len(t, stale, 1, "a cold show moves to 'stale'")
+	recent, err = svc.UpNextByRecency(context.Background(), userID, RecencyRecent)
+	require.NoError(t, err)
+	assert.Empty(t, recent, "no longer recent")
+}

@@ -147,12 +147,18 @@ func tvAddShow(t *testing.T, r *gin.Engine, cookie *http.Cookie) {
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 }
 
+// tvGetUpNext returns every Up Next entry regardless of recency bucket by
+// merging all three filters, so watch-toggle assertions stay recency-agnostic.
 func tvGetUpNext(t *testing.T, r *gin.Engine, cookie *http.Cookie) tvUpNextPayload {
 	t.Helper()
-	w := doJSON(r, http.MethodGet, "/api/tv/up-next", nil, cookie)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var page tvUpNextPayload
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &page))
+	for _, f := range []string{"recent", "stale", "unstarted"} {
+		w := doJSON(r, http.MethodGet, "/api/tv/up-next?filter="+f, nil, cookie)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var p tvUpNextPayload
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &p))
+		page.Items = append(page.Items, p.Items...)
+	}
 	return page
 }
 

@@ -425,3 +425,53 @@ func TestResolveRespectsSharedLock(t *testing.T) {
 	assert.Equal(t, http.StatusServiceUnavailable, rec.Code)
 	assert.Equal(t, "10", rec.Header().Get("Retry-After"))
 }
+
+// TestGoodreadsBookImport imports a Goodreads library export: ISBN-13 rows
+// become Book + BOOK tracking rows with the shelf mapped to a status, and a
+// row without a usable ISBN-13 is skipped and counted.
+func TestGoodreadsBookImport(t *testing.T) {
+	e := newEnv(t)
+	jobID := e.startImport(t, map[string][]byte{
+		"goodreads_library_export.csv": fixture(t, "goodreads_library_export.csv"),
+	})
+	jr := e.waitForJob(t, jobID)
+
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 4, jr.Total)
+	assert.Equal(t, 4, jr.Processed)
+	assert.Equal(t, 1, jr.Skipped, "the ISBN-less row is skipped")
+
+	assert.EqualValues(t, 3, count[models.Book](t, e.db))
+	assert.EqualValues(t, 3, count[models.TrackingItem](t, e.db, "user_id = ? AND type = ?", 1, "BOOK"))
+
+	dune := bookItem(t, e.db, "9780441013593")
+	assert.Equal(t, "Dune", dune.Title)
+	assert.Equal(t, "COMPLETED", dune.Status)
+	assert.Equal(t, 412, dune.Progress, "a finished book seeds progress to its page count")
+
+	assert.Equal(t, "READING", bookItem(t, e.db, "9780547928227").Status)
+	assert.Equal(t, "PLAN_TO", bookItem(t, e.db, "9780441569595").Status)
+
+	var book models.Book
+	require.NoError(t, e.db.Where("isbn13 = ?", "9780441013593").First(&book).Error)
+	assert.Equal(t, "Frank Herbert", book.Authors)
+	assert.Equal(t, 412, book.PageCount)
+}
+
+// TestGoodreadsReimportIsIdempotent guards the book upsert path.
+func TestGoodreadsReimportIsIdempotent(t *testing.T) {
+	e := newEnv(t)
+	files := map[string][]byte{"goodreads_library_export.csv": fixture(t, "goodreads_library_export.csv")}
+	e.waitForJob(t, e.startImport(t, files))
+	e.waitForJob(t, e.startImport(t, files))
+
+	assert.EqualValues(t, 3, count[models.Book](t, e.db), "re-import must not duplicate books")
+	assert.EqualValues(t, 3, count[models.TrackingItem](t, e.db, "type = ?", "BOOK"))
+}
+
+func bookItem(t *testing.T, gdb *gorm.DB, isbn13 string) models.TrackingItem {
+	t.Helper()
+	var item models.TrackingItem
+	require.NoError(t, gdb.Where("type = ? AND external_id = ?", "BOOK", isbn13).First(&item).Error)
+	return item
+}

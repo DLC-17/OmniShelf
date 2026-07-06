@@ -144,6 +144,8 @@ describe('global 401 handling', () => {
     renderApp('/')
     const user = userEvent.setup()
 
+    // Sign out now lives on the settings page, reached via the username nav link.
+    await user.click(await screen.findByRole('link', { name: /settings/i }))
     // Trigger an API call that 401s (logout stubbed to fail with 401).
     await user.click(await screen.findByRole('button', { name: /sign out/i }))
 

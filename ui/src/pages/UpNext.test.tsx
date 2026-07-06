@@ -22,7 +22,7 @@ describe('Up Next dashboard', () => {
 
     renderApp('/')
 
-    expect(await screen.findByText(/nothing to watch right now/i)).toBeInTheDocument()
+    expect(await screen.findByText(/nothing watched in the last two weeks/i)).toBeInTheDocument()
     // Empty state, never a blank screen: the add-a-show flow is still offered.
     expect(screen.getByRole('search')).toBeInTheDocument()
   })

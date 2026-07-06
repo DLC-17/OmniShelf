@@ -29,14 +29,23 @@ var (
 	seasonHeaders  = []string{"episode_season_number", "season_number", "season", "season_no"}
 	episodeHeaders = []string{"episode_number", "episode", "number", "episode_no"}
 	watchedHeaders = []string{"watched_at", "created_at", "updated_at", "watch_date", "date", "time"}
+
+	// Goodreads library export columns (books). An ISBN column alongside a
+	// title is the signal that distinguishes a book export from a TV export.
+	authorHeaders = []string{"author", "authors"}
+	isbn13Headers = []string{"isbn13"}
+	isbnHeaders   = []string{"isbn"}
+	shelfHeaders  = []string{"exclusive_shelf", "bookshelves", "shelf"}
+	pagesHeaders  = []string{"number_of_pages", "pages", "page_count", "num_pages"}
 )
 
 // fileKind classifies a recognized CSV.
 type fileKind int
 
 const (
-	kindFollowed fileKind = iota // followed_shows.csv shape
-	kindSeen                     // seen_episodes.csv shape
+	kindFollowed  fileKind = iota // followed_shows.csv shape (TV)
+	kindSeen                      // seen_episodes.csv shape (TV)
+	kindGoodreads                 // Goodreads library export (books)
 )
 
 // UploadFile is one file received in the multipart upload (or extracted from
@@ -56,7 +65,13 @@ type parsedFile struct {
 	seasonIdx  int
 	episodeIdx int
 	watchedIdx int // -1 when absent
-	records    [][]string
+	// Goodreads (book) column indices; -1 when absent.
+	authorIdx int
+	isbn13Idx int
+	isbnIdx   int
+	shelfIdx  int
+	pagesIdx  int
+	records   [][]string
 }
 
 // Payload is a fully classified upload ready for background processing.
@@ -164,7 +179,10 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 		return nil, validationErrorf("%s: not a readable CSV file", f.Name)
 	}
 
-	pf := &parsedFile{name: f.Name, titleIdx: -1, seasonIdx: -1, episodeIdx: -1, watchedIdx: -1}
+	pf := &parsedFile{
+		name: f.Name, titleIdx: -1, seasonIdx: -1, episodeIdx: -1, watchedIdx: -1,
+		authorIdx: -1, isbn13Idx: -1, isbnIdx: -1, shelfIdx: -1, pagesIdx: -1,
+	}
 	for i, h := range header {
 		switch n := normalizeHeader(h); {
 		case pf.titleIdx < 0 && matchesHeader(n, titleHeaders):
@@ -175,17 +193,30 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 			pf.episodeIdx = i
 		case pf.watchedIdx < 0 && matchesHeader(n, watchedHeaders):
 			pf.watchedIdx = i
+		case pf.authorIdx < 0 && matchesHeader(n, authorHeaders):
+			pf.authorIdx = i
+		case pf.isbn13Idx < 0 && matchesHeader(n, isbn13Headers):
+			pf.isbn13Idx = i
+		case pf.isbnIdx < 0 && matchesHeader(n, isbnHeaders):
+			pf.isbnIdx = i
+		case pf.shelfIdx < 0 && matchesHeader(n, shelfHeaders):
+			pf.shelfIdx = i
+		case pf.pagesIdx < 0 && matchesHeader(n, pagesHeaders):
+			pf.pagesIdx = i
 		}
 	}
 
 	switch {
+	case pf.titleIdx >= 0 && (pf.isbn13Idx >= 0 || pf.isbnIdx >= 0):
+		// A title alongside an ISBN column is a Goodreads (book) export.
+		pf.kind = kindGoodreads
 	case pf.titleIdx >= 0 && pf.seasonIdx >= 0 && pf.episodeIdx >= 0:
 		pf.kind = kindSeen
 	case pf.titleIdx >= 0:
 		pf.kind = kindFollowed
 	default:
 		return nil, validationErrorf(
-			"%s: header row not recognized as a TV Time export (expected a show title column such as tv_show_name)", f.Name)
+			"%s: header row not recognized as a TV Time or Goodreads export (expected a title column, plus an ISBN column for books)", f.Name)
 	}
 
 	for {

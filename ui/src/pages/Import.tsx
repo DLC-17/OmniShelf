@@ -138,8 +138,8 @@ function JobProgress({ jobId }: JobProgressProps) {
     return (
       <div className="stack">
         <p>
-          Importing… {job.processed} / {job.total} shows processed
-          {job.skipped > 0 && ` (${job.skipped} malformed rows skipped)`}
+          Importing… {job.processed} / {job.total} entries processed
+          {job.skipped > 0 && ` (${job.skipped} rows skipped)`}
         </p>
         <progress value={job.processed} max={Math.max(job.total, 1)} />
       </div>
@@ -158,8 +158,8 @@ function JobProgress({ jobId }: JobProgressProps) {
   return (
     <div>
       <p className="notice">
-        Import complete: {job.processed} / {job.total} shows processed
-        {job.skipped > 0 && `, ${job.skipped} malformed rows skipped`}
+        Import complete: {job.processed} / {job.total} entries processed
+        {job.skipped > 0 && `, ${job.skipped} rows skipped`}
         {job.unresolved.length > 0 && `, ${job.unresolved.length} titles need manual resolution`}.
       </p>
       {job.unresolved.length > 0 ? (
@@ -194,8 +194,9 @@ export default function Import() {
     <section>
       <h1>Import</h1>
       <p>
-        Import your TV Time history: upload <code>followed_shows.csv</code> and/or{' '}
-        <code>seen_episodes.csv</code> — raw CSVs or the exported zip.
+        Import your history — TV Time (<code>followed_shows.csv</code> /{' '}
+        <code>seen_episodes.csv</code>) or a Goodreads{' '}
+        <code>library_export.csv</code>. Raw CSVs or a zip export both work.
       </p>
 
       {jobId === null ? (

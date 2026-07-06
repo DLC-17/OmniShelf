@@ -1,30 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchUpNext, markWatched } from '../api/tv'
-import type { UpNextEntry } from '../api/tv'
+import type { UpNextEntry, UpNextFilter } from '../api/tv'
 
+/** Prefix key for every recency-filtered Up Next query. */
 export const UP_NEXT_KEY = ['tv', 'up-next'] as const
+export const upNextKey = (filter: UpNextFilter) => ['tv', 'up-next', filter] as const
 
 /**
  * Cache entry for the Up Next dashboard. `optimisticWatched` is a client-only
  * flag set while a mark-watched request is in flight so the checkmark fills in
- * immediately; it is rolled back on error and replaced by the swapped-in next
- * episode on success.
+ * immediately; it is rolled back on error and reconciled by a refetch.
  */
 export interface UpNextCard extends UpNextEntry {
   optimisticWatched?: boolean
 }
 
-export function useUpNext() {
+export function useUpNext(filter: UpNextFilter) {
   return useQuery<UpNextCard[]>({
-    queryKey: UP_NEXT_KEY,
-    queryFn: fetchUpNext,
+    queryKey: upNextKey(filter),
+    queryFn: () => fetchUpNext(filter),
   })
 }
 
 /**
- * One-tap watch checkmark. Optimistically marks the card
- * watched, rolls back on error, and on success swaps the card's episode to the
- * next-up episode returned by the API — or removes the card when none remains.
+ * One-tap watch checkmark. Optimistically fills the checkmark across every
+ * cached recency bucket, rolls back on error, and on settle refetches so the
+ * server re-buckets the show (e.g. a just-watched show moves into "recent").
  */
 export function useMarkWatched() {
   const queryClient = useQueryClient()
@@ -33,21 +34,21 @@ export function useMarkWatched() {
     mutationFn: (episodeId: number) => markWatched(episodeId),
     onMutate: async (episodeId) => {
       await queryClient.cancelQueries({ queryKey: UP_NEXT_KEY })
-      const previous = queryClient.getQueryData<UpNextCard[]>(UP_NEXT_KEY)
-      queryClient.setQueryData<UpNextCard[]>(UP_NEXT_KEY, (old) =>
+      const snapshot = queryClient.getQueriesData<UpNextCard[]>({ queryKey: UP_NEXT_KEY })
+      queryClient.setQueriesData<UpNextCard[]>({ queryKey: UP_NEXT_KEY }, (old) =>
         old?.map((entry) =>
           entry.episode.id === episodeId ? { ...entry, optimisticWatched: true } : entry,
         ),
       )
-      return { previous }
+      return { snapshot }
     },
     onError: (_err, _episodeId, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(UP_NEXT_KEY, context.previous)
-      }
+      context?.snapshot.forEach(([key, data]) => queryClient.setQueryData(key, data))
     },
     onSuccess: (nextUp, episodeId) => {
-      queryClient.setQueryData<UpNextCard[]>(UP_NEXT_KEY, (old) =>
+      // Swap the card's episode to the returned next-up (or drop the card when
+      // the show has no aired unwatched episodes left), across every bucket.
+      queryClient.setQueriesData<UpNextCard[]>({ queryKey: UP_NEXT_KEY }, (old) =>
         old?.flatMap((entry) => {
           if (entry.episode.id !== episodeId) return [entry]
           return nextUp === null ? [] : [{ show: entry.show, episode: nextUp }]

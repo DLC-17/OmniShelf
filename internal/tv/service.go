@@ -291,6 +291,90 @@ func (s *Service) UpNext(ctx context.Context, userID uint) ([]UpNextEntry, error
 	return entries, nil
 }
 
+// Recency buckets a WATCHING show by how recently the user last watched an
+// episode of it, for the Up Next dashboard toggle.
+type Recency string
+
+const (
+	RecencyRecent    Recency = "recent"    // watched within the window (default)
+	RecencyStale     Recency = "stale"     // watched, but not within the window
+	RecencyUnstarted Recency = "unstarted" // tracked but never watched
+)
+
+// recencyWindow is how long a show stays in the default "recent" bucket after
+// its last watch (spec: last 14 days).
+const recencyWindow = 14 * 24 * time.Hour
+
+// UpNextByRecency returns the Up Next entries in one recency bucket: recently
+// watched, watched-but-gone-cold, or never-started. It is layered over UpNext
+// so the underlying "earliest aired unwatched episode" rule is unchanged.
+func (s *Service) UpNextByRecency(ctx context.Context, userID uint, filter Recency) ([]UpNextEntry, error) {
+	entries, err := s.UpNext(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	last, err := s.lastWatchByShow(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	cutoff := time.Now().Add(-recencyWindow)
+
+	out := make([]UpNextEntry, 0, len(entries))
+	for _, e := range entries {
+		cat := RecencyUnstarted
+		if t, ok := last[e.Show.ID]; ok {
+			if t.After(cutoff) {
+				cat = RecencyRecent
+			} else {
+				cat = RecencyStale
+			}
+		}
+		if cat == filter {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+// lastWatchByShow returns the user's most recent watch time per show. It loads
+// through the models (not a raw aggregate) so the sqlite driver parses the
+// timestamps into time.Time, then reduces to a per-show max in Go.
+func (s *Service) lastWatchByShow(ctx context.Context, userID uint) (map[uint]time.Time, error) {
+	var watches []models.EpisodeWatch
+	if err := s.db.WithContext(ctx).Where("user_id = ?", userID).Find(&watches).Error; err != nil {
+		return nil, fmt.Errorf("tv: load watches: %w", err)
+	}
+	if len(watches) == 0 {
+		return map[uint]time.Time{}, nil
+	}
+
+	epIDs := make([]uint, 0, len(watches))
+	for _, w := range watches {
+		epIDs = append(epIDs, w.EpisodeID)
+	}
+	var eps []models.Episode
+	if err := s.db.WithContext(ctx).Select("id", "show_id").
+		Where("id IN ?", epIDs).Find(&eps).Error; err != nil {
+		return nil, fmt.Errorf("tv: load episodes for watches: %w", err)
+	}
+	showByEp := make(map[uint]uint, len(eps))
+	for _, e := range eps {
+		showByEp[e.ID] = e.ShowID
+	}
+
+	last := make(map[uint]time.Time, len(showByEp))
+	for _, w := range watches {
+		showID, ok := showByEp[w.EpisodeID]
+		if !ok {
+			continue
+		}
+		if cur, seen := last[showID]; !seen || w.WatchedAt.After(cur) {
+			last[showID] = w.WatchedAt
+		}
+	}
+	return last, nil
+}
+
 // MarkWatched records the episode as seen (idempotent: re-marking is a
 // no-op, never a duplicate row) and returns the show's new next-up episode
 // (nil when the show has no aired unwatched episodes left).

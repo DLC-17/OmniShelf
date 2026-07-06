@@ -65,8 +65,11 @@ export function addShow(tmdbId: number): Promise<AddShowResponse> {
   return request<AddShowResponse>('/api/tv/shows', { method: 'POST', body: { tmdbId } })
 }
 
-export async function fetchUpNext(): Promise<UpNextEntry[]> {
-  const res = await request<{ items: UpNextEntry[] }>('/api/tv/up-next')
+/** Recency bucket for the Up Next dashboard toggle. */
+export type UpNextFilter = 'recent' | 'stale' | 'unstarted'
+
+export async function fetchUpNext(filter: UpNextFilter = 'recent'): Promise<UpNextEntry[]> {
+  const res = await request<{ items: UpNextEntry[] }>(`/api/tv/up-next?filter=${filter}`)
   return res.items
 }
 
