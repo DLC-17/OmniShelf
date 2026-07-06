@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import type { UpNextCard as UpNextCardData } from '../../hooks/useUpNext'
+import EpisodeList from './EpisodeList'
 import Poster from './Poster'
 
 /** "S03E07" — TV Time style episode code. */
@@ -14,33 +16,45 @@ interface UpNextCardProps {
 
 /**
  * One Up Next dashboard card: poster, show title, next episode label and the
- * one-tap watch checkmark. While the mutation is in flight the checkmark shows
- * the optimistic "watched" state (filled); on error the hook rolls it back.
+ * one-tap watch checkmark. Clicking the show opens the full episode picker so
+ * the user can mark any episode watched, rewatch, or catch up in bulk.
  */
 export default function UpNextCard({ entry, onMarkWatched }: UpNextCardProps) {
   const { show, episode } = entry
   const watched = entry.optimisticWatched === true
   const code = episodeCode(episode.season, episode.number)
   const label = episode.title === '' ? code : `${code} · ${episode.title}`
+  const [expanded, setExpanded] = useState(false)
 
   return (
-    <li className={watched ? 'card card-row is-dim' : 'card card-row'}>
-      <Poster posterPath={show.posterPath} title={show.title} />
-      <div className="grow">
-        <h3>{show.title}</h3>
-        <p style={{ margin: 0 }}>{label}</p>
-        {episode.airDate !== null && <p className="meta">Aired {episode.airDate}</p>}
+    <li className={watched ? 'card is-dim' : 'card'}>
+      <div className="card-row">
+        <Poster posterPath={show.posterPath} title={show.title} />
+        <button
+          type="button"
+          className="show-toggle grow"
+          aria-expanded={expanded}
+          aria-label={`${expanded ? 'Hide' : 'Show'} episodes for ${show.title}`}
+          onClick={() => setExpanded((v) => !v)}
+        >
+          <h3>
+            {show.title} <span className="show-caret" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+          </h3>
+          <p style={{ margin: 0 }}>{label}</p>
+          {episode.airDate !== null && <p className="meta">Aired {episode.airDate}</p>}
+        </button>
+        <button
+          type="button"
+          className="check"
+          aria-label={`Mark ${show.title} ${code} watched`}
+          aria-pressed={watched}
+          disabled={watched}
+          onClick={() => onMarkWatched(episode.id)}
+        >
+          &#10003;
+        </button>
       </div>
-      <button
-        type="button"
-        className="check"
-        aria-label={`Mark ${show.title} ${code} watched`}
-        aria-pressed={watched}
-        disabled={watched}
-        onClick={() => onMarkWatched(episode.id)}
-      >
-        &#10003;
-      </button>
+      {expanded && <EpisodeList showId={show.id} />}
     </li>
   )
 }

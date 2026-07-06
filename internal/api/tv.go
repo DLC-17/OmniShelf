@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -20,14 +21,17 @@ const (
 	CodeTMDBUnavailable = "tmdb_unavailable"
 )
 
-// RegisterTVRoutes attaches the TV endpoints (spec §2.2) to the JWT-guarded
+// RegisterTVRoutes attaches the TV endpoints to the JWT-guarded
 // /api group returned by RegisterRoutes. Wired from main by the orchestrator.
 func RegisterTVRoutes(grp *gin.RouterGroup, svc *tv.Service) {
 	h := &tvHandler{svc: svc}
 	grp.GET("/tv/search", h.search)
 	grp.POST("/tv/shows", h.addShow)
 	grp.GET("/tv/up-next", h.upNext)
+	grp.GET("/tv/shows/:id/episodes", h.listEpisodes)
 	grp.POST("/tv/episodes/:id/watch", h.markWatched)
+	grp.POST("/tv/episodes/:id/rewatch", h.rewatch)
+	grp.POST("/tv/episodes/:id/watch-through", h.watchThrough)
 	grp.DELETE("/tv/episodes/:id/watch", h.unmarkWatched)
 }
 
@@ -62,6 +66,14 @@ type episodeDTO struct {
 	AirDate *string `json:"airDate"` // "YYYY-MM-DD", null = unannounced
 }
 
+// episodeWatchDTO is one row of the episode picker: the episode fields plus
+// this user's watch state.
+type episodeWatchDTO struct {
+	episodeDTO
+	Watched   bool    `json:"watched"`
+	WatchedAt *string `json:"watchedAt"` // RFC3339, null when unwatched
+}
+
 type trackingItemDTO struct {
 	ID         uint   `json:"id"`
 	Type       string `json:"type"`
@@ -90,7 +102,7 @@ func toItemDTO(i models.TrackingItem) trackingItemDTO {
 // ── handlers ──
 
 // search handles GET /api/tv/search?q= — server-side TMDB proxy (the API key
-// never reaches the browser, hard rule 3).
+// never reaches the browser).
 func (h *tvHandler) search(c *gin.Context) {
 	q := strings.TrimSpace(c.Query("q"))
 	if q == "" {
@@ -115,7 +127,7 @@ func (h *tvHandler) search(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"results": results})
 }
 
-// addShow handles POST /api/tv/shows {tmdbId} (spec §2.2 step 2).
+// addShow handles POST /api/tv/shows {tmdbId}.
 func (h *tvHandler) addShow(c *gin.Context) {
 	var body struct {
 		TMDBID int `json:"tmdbId"`
@@ -135,7 +147,7 @@ func (h *tvHandler) addShow(c *gin.Context) {
 	})
 }
 
-// upNext handles GET /api/tv/up-next (spec §2.2 step 3).
+// upNext handles GET /api/tv/up-next.
 func (h *tvHandler) upNext(c *gin.Context) {
 	entries, err := h.svc.UpNext(c.Request.Context(), CurrentUserID(c))
 	if err != nil {
@@ -152,11 +164,48 @@ func (h *tvHandler) upNext(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+// listEpisodes handles GET /api/tv/shows/:id/episodes — every episode of the
+// show with the caller's per-episode watched state, for the episode picker.
+func (h *tvHandler) listEpisodes(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "show id must be a positive integer")
+		return
+	}
+	states, err := h.svc.ListEpisodes(c.Request.Context(), CurrentUserID(c), uint(id))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	episodes := make([]episodeWatchDTO, 0, len(states))
+	for _, st := range states {
+		dto := episodeWatchDTO{episodeDTO: toEpisodeDTO(st.Episode), Watched: st.Watched}
+		if st.WatchedAt != nil {
+			w := st.WatchedAt.Format(time.RFC3339)
+			dto.WatchedAt = &w
+		}
+		episodes = append(episodes, dto)
+	}
+	c.JSON(http.StatusOK, gin.H{"episodes": episodes})
+}
+
 // markWatched handles POST /api/tv/episodes/:id/watch. The response carries
 // the show's new next-up episode so the UI can swap the card in place
-// without a reload (spec §2.2 step 4).
+// without a reload.
 func (h *tvHandler) markWatched(c *gin.Context) {
 	h.toggleWatch(c, h.svc.MarkWatched)
+}
+
+// rewatch handles POST /api/tv/episodes/:id/rewatch — re-stamp an already
+// watched episode (or mark a fresh one) with the current time.
+func (h *tvHandler) rewatch(c *gin.Context) {
+	h.toggleWatch(c, h.svc.Rewatch)
+}
+
+// watchThrough handles POST /api/tv/episodes/:id/watch-through — mark this
+// episode and every earlier aired episode of the show as watched.
+func (h *tvHandler) watchThrough(c *gin.Context) {
+	h.toggleWatch(c, h.svc.WatchThrough)
 }
 
 // unmarkWatched handles DELETE /api/tv/episodes/:id/watch.

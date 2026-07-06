@@ -339,6 +339,11 @@ button:disabled {
   font-size: 0.85rem;
   margin: 0;
 }
+.search-overview {
+  margin-top: 0.25rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 
 .badge {
   display: inline-block;
@@ -437,6 +442,101 @@ button:disabled {
   background: var(--confirm);
   border-color: var(--confirm);
   color: var(--confirm-ink);
+}
+
+/* ---------- Episode picker ---------- */
+
+.show-toggle {
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.25rem 0.4rem;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.show-toggle:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: transparent;
+}
+.show-toggle h3 {
+  margin: 0 0 0.15rem;
+}
+.show-caret {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.episodes {
+  margin-top: 0.9rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 1rem;
+}
+.episode-season-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.35rem 0.4rem;
+  cursor: pointer;
+  color: inherit;
+}
+.episode-season-toggle:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: transparent;
+}
+.episode-season-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-right: auto;
+}
+.episode-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+.episode-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-alt);
+  font-size: 0.92rem;
+}
+.episode-row.watched {
+  background: color-mix(in srgb, var(--confirm) 14%, var(--surface));
+}
+.episode-check {
+  width: 1.1rem;
+  text-align: center;
+  color: var(--confirm);
+  font-weight: 700;
+}
+.episode-row:not(.watched) .episode-check {
+  color: var(--muted);
+}
+.episode-code {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.episode-title {
+  color: var(--muted);
+}
+.episode-row button {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
 }
 
 /* ---------- Poster ---------- */

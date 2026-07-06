@@ -397,3 +397,107 @@ func TestAddShowSharedMetadataUpsert(t *testing.T) {
 	assert.EqualValues(t, 1, shows)
 	assert.EqualValues(t, 5, eps, "episodes must be upserted, not duplicated")
 }
+
+// ── episode picker: list / rewatch / watch-through ──
+
+func TestListEpisodesReturnsAllWithWatchState(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+	s1e1 := episodeByNumber(t, gdb, res.Show.ID, 1, 1)
+	_, err := svc.MarkWatched(context.Background(), userID, s1e1.ID)
+	require.NoError(t, err)
+
+	states, err := svc.ListEpisodes(context.Background(), userID, res.Show.ID)
+	require.NoError(t, err)
+	require.Len(t, states, 5, "all five fixture episodes returned")
+
+	// Ordered by (season, number).
+	assert.Equal(t, 1, states[0].Episode.Season)
+	assert.Equal(t, 1, states[0].Episode.Number)
+	assert.Equal(t, 2, states[4].Episode.Season)
+	assert.Equal(t, 3, states[4].Episode.Number)
+
+	assert.True(t, states[0].Watched, "S1E1 is watched")
+	require.NotNil(t, states[0].WatchedAt)
+	assert.False(t, states[1].Watched, "S1E2 is unwatched")
+	assert.Nil(t, states[1].WatchedAt)
+}
+
+func TestListEpisodesUnknownShow(t *testing.T) {
+	svc, _ := newTestService(t, twoSeasonShow(), &fakeImages{})
+	_, err := svc.ListEpisodes(context.Background(), userID, 424242)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestRewatchRefreshesTimestamp(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+	s1e1 := episodeByNumber(t, gdb, res.Show.ID, 1, 1)
+
+	_, err := svc.MarkWatched(context.Background(), userID, s1e1.ID)
+	require.NoError(t, err)
+
+	// Backdate the watch so the rewatch is unambiguously newer.
+	old := time.Now().Add(-time.Hour).Truncate(time.Second)
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+		Where("user_id = ? AND episode_id = ?", userID, s1e1.ID).
+		Update("watched_at", old).Error)
+
+	_, err = svc.Rewatch(context.Background(), userID, s1e1.ID)
+	require.NoError(t, err)
+
+	var rows int64
+	var watch models.EpisodeWatch
+	require.NoError(t, gdb.Where("user_id = ? AND episode_id = ?", userID, s1e1.ID).First(&watch).Error)
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+		Where("user_id = ? AND episode_id = ?", userID, s1e1.ID).Count(&rows).Error)
+	assert.EqualValues(t, 1, rows, "rewatch upserts, never duplicates")
+	assert.True(t, watch.WatchedAt.After(old), "rewatch advances WatchedAt")
+}
+
+func TestRewatchUnknownEpisode(t *testing.T) {
+	svc, _ := newTestService(t, twoSeasonShow(), &fakeImages{})
+	_, err := svc.Rewatch(context.Background(), userID, 999999)
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestWatchThroughMarksAllPriorAired(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+	s2e1 := episodeByNumber(t, gdb, res.Show.ID, 2, 1)
+
+	next, err := svc.WatchThrough(context.Background(), userID, s2e1.ID)
+	require.NoError(t, err)
+	assert.Nil(t, next, "no aired unwatched episodes remain after catching up through S2E1")
+
+	// S1E1, S1E2, S2E1 (all aired, <= S2E1) are watched; the future S2E2 and
+	// unannounced S2E3 are not.
+	var count int64
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+		Where("user_id = ?", userID).Count(&count).Error)
+	assert.EqualValues(t, 3, count, "exactly the three aired episodes up to S2E1 are marked")
+
+	for _, sn := range [][2]int{{2, 2}, {2, 3}} {
+		ep := episodeByNumber(t, gdb, res.Show.ID, sn[0], sn[1])
+		var rows int64
+		require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+			Where("user_id = ? AND episode_id = ?", userID, ep.ID).Count(&rows).Error)
+		assert.EqualValues(t, 0, rows, "unaired episodes are never bulk-marked")
+	}
+}
+
+func TestWatchThroughIsIdempotent(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+	s2e1 := episodeByNumber(t, gdb, res.Show.ID, 2, 1)
+
+	_, err := svc.WatchThrough(context.Background(), userID, s2e1.ID)
+	require.NoError(t, err)
+	_, err = svc.WatchThrough(context.Background(), userID, s2e1.ID)
+	require.NoError(t, err)
+
+	var count int64
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).
+		Where("user_id = ?", userID).Count(&count).Error)
+	assert.EqualValues(t, 3, count, "re-running watch-through does not duplicate rows")
+}

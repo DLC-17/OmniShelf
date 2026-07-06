@@ -9,9 +9,44 @@ interface AddFeedback {
   isError: boolean
 }
 
+/** TMDB CDN for search thumbnails (un-added shows aren't cached locally yet). */
+const TMDB_THUMB = 'https://image.tmdb.org/t/p/w154'
+
 /** First-air year, e.g. "2011", or empty when TMDB has no date. */
 function airYear(result: TVSearchResult): string {
   return result.firstAirDate === '' ? '' : result.firstAirDate.slice(0, 4)
+}
+
+/**
+ * Small poster for a search hit. A raw TMDB path (leading slash) loads from the
+ * TMDB CDN; a cached path resolves under /images. Empty paths and load failures
+ * fall back to a neutral initial-letter placeholder.
+ */
+function ResultPoster({ posterPath, title }: { posterPath: string; title: string }) {
+  const [failed, setFailed] = useState(false)
+  if (posterPath === '' || failed) {
+    return (
+      <div
+        role="img"
+        aria-label={`No poster for ${title}`}
+        className="poster placeholder"
+        style={{ width: 46, height: 69, fontSize: '1rem' }}
+      >
+        {title.charAt(0).toUpperCase()}
+      </div>
+    )
+  }
+  const src = posterPath.startsWith('/') ? `${TMDB_THUMB}${posterPath}` : `/images/${posterPath}`
+  return (
+    <img
+      src={src}
+      alt={`Poster for ${title}`}
+      width={46}
+      height={69}
+      className="poster"
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 /**
@@ -85,21 +120,12 @@ export default function ShowSearch() {
             const fb = feedback[result.id]
             return (
               <li key={result.id} className="card card-row">
+                <ResultPoster posterPath={result.posterPath} title={result.name} />
                 <div className="grow">
                   <strong>{result.name}</strong>
                   {airYear(result) !== '' && <span className="muted"> ({airYear(result)})</span>}
                   {result.overview !== '' && (
-                    <p
-                      className="meta"
-                      style={{
-                        marginTop: '0.25rem',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {result.overview}
-                    </p>
+                    <p className="meta search-overview">{result.overview}</p>
                   )}
                 </div>
                 {fb !== undefined ? (

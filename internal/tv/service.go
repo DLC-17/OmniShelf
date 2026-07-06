@@ -1,9 +1,9 @@
 // Package tv implements the TV-domain service layer: TMDB search proxying,
 // adding shows (metadata + episode persistence + poster caching + tracking),
-// the Up Next query (project_spec.md §3), and the one-tap watch toggle.
+// the Up Next query, and the one-tap watch toggle.
 //
 // HTTP handlers in internal/api stay thin and delegate here
-// (.ai/coding_standards.md: business logic lives in /internal/* packages).
+// (business logic lives in /internal/* packages).
 package tv
 
 import (
@@ -109,7 +109,7 @@ func upstream(err error) error {
 	return &UpstreamError{Err: err}
 }
 
-// Search proxies a TMDB TV search (spec §2.2 step 1).
+// Search proxies a TMDB TV search.
 func (s *Service) Search(ctx context.Context, query string) (*tmdb.SearchResponse, error) {
 	res, err := s.tmdb.SearchTV(ctx, query)
 	if err != nil {
@@ -249,7 +249,7 @@ type UpNextEntry struct {
 	Episode models.Episode
 }
 
-// UpNext returns, per spec §3, for each of the user's WATCHING TV tracking
+// UpNext returns, for each of the user's WATCHING TV tracking
 // items, the minimum (season, number) episode with a non-nil air date <= now
 // and no EpisodeWatch row for this user. Shows with no such episode are
 // omitted.
@@ -322,6 +322,110 @@ func (s *Service) UnmarkWatched(ctx context.Context, userID, episodeID uint) (*m
 	return s.nextUp(ctx, userID, ep.ShowID)
 }
 
+// EpisodeState is one episode of a show plus this user's watch state, as
+// returned by ListEpisodes for the expandable episode picker.
+type EpisodeState struct {
+	Episode   models.Episode
+	Watched   bool
+	WatchedAt *time.Time
+}
+
+// ListEpisodes returns every episode of a show in (season, number) order with
+// the caller's per-episode watched flag. A missing show is ErrNotFound.
+func (s *Service) ListEpisodes(ctx context.Context, userID, showID uint) ([]EpisodeState, error) {
+	var show models.Show
+	err := s.db.WithContext(ctx).First(&show, showID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: show %d", ErrNotFound, showID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("tv: load show %d: %w", showID, err)
+	}
+
+	var eps []models.Episode
+	if err := s.db.WithContext(ctx).
+		Where("show_id = ?", showID).
+		Order("season, number").
+		Find(&eps).Error; err != nil {
+		return nil, fmt.Errorf("tv: list episodes for show %d: %w", showID, err)
+	}
+
+	var watches []models.EpisodeWatch
+	if err := s.db.WithContext(ctx).
+		Joins("JOIN episodes e ON e.id = episode_watches.episode_id").
+		Where("e.show_id = ? AND episode_watches.user_id = ?", showID, userID).
+		Find(&watches).Error; err != nil {
+		return nil, fmt.Errorf("tv: load watch state for show %d: %w", showID, err)
+	}
+	watchedAt := make(map[uint]time.Time, len(watches))
+	for _, w := range watches {
+		watchedAt[w.EpisodeID] = w.WatchedAt
+	}
+
+	states := make([]EpisodeState, 0, len(eps))
+	for _, e := range eps {
+		st := EpisodeState{Episode: e}
+		if t, ok := watchedAt[e.ID]; ok {
+			st.Watched = true
+			when := t
+			st.WatchedAt = &when
+		}
+		states = append(states, st)
+	}
+	return states, nil
+}
+
+// Rewatch (re-)stamps the episode as watched now. Unlike MarkWatched it is not
+// a no-op when a watch row already exists: it refreshes WatchedAt so a rewatch
+// bumps the episode to the top of the activity feed.
+func (s *Service) Rewatch(ctx context.Context, userID, episodeID uint) (*models.Episode, error) {
+	ep, err := s.episode(ctx, episodeID)
+	if err != nil {
+		return nil, err
+	}
+	watch := models.EpisodeWatch{UserID: userID, EpisodeID: episodeID, WatchedAt: time.Now()}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "episode_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"watched_at"}),
+	}).Create(&watch).Error; err != nil {
+		return nil, fmt.Errorf("tv: rewatch: %w", err)
+	}
+	return s.nextUp(ctx, userID, ep.ShowID)
+}
+
+// WatchThrough marks the target episode and every earlier aired episode of the
+// same show as watched in one go — for the "I've seen everything up to here"
+// choice. Already-watched episodes are left untouched (their timestamps are
+// preserved). Returns the show's new next-up episode.
+func (s *Service) WatchThrough(ctx context.Context, userID, episodeID uint) (*models.Episode, error) {
+	target, err := s.episode(ctx, episodeID)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	var eps []models.Episode
+	if err := s.db.WithContext(ctx).
+		Where("show_id = ? AND air_date IS NOT NULL AND air_date <= ?", target.ShowID, now).
+		Where("season < ? OR (season = ? AND number <= ?)", target.Season, target.Season, target.Number).
+		Find(&eps).Error; err != nil {
+		return nil, fmt.Errorf("tv: watch-through query: %w", err)
+	}
+
+	rows := make([]models.EpisodeWatch, 0, len(eps))
+	for _, e := range eps {
+		rows = append(rows, models.EpisodeWatch{UserID: userID, EpisodeID: e.ID, WatchedAt: now})
+	}
+	if len(rows) > 0 {
+		if err := s.db.WithContext(ctx).
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&rows).Error; err != nil {
+			return nil, fmt.Errorf("tv: watch-through insert: %w", err)
+		}
+	}
+	return s.nextUp(ctx, userID, target.ShowID)
+}
+
 // episode loads an episode by ID, mapping a missing row to ErrNotFound.
 func (s *Service) episode(ctx context.Context, id uint) (*models.Episode, error) {
 	var ep models.Episode
@@ -335,7 +439,7 @@ func (s *Service) episode(ctx context.Context, id uint) (*models.Episode, error)
 	return &ep, nil
 }
 
-// nextUp implements the spec §3 Up Next definition for one show: the minimum
+// nextUp computes the Up Next episode for one show: the minimum
 // (season, number) episode with air_date IS NOT NULL AND air_date <= now and
 // no EpisodeWatch row for the user. Returns nil (no error) when none exists.
 func (s *Service) nextUp(ctx context.Context, userID, showID uint) (*models.Episode, error) {
