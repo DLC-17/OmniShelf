@@ -71,6 +71,16 @@ type Book struct {
 	Description string // OpenLibrary work summary; may be empty
 }
 
+// RejectedRec records a Discover suggestion the user dismissed, so it is not
+// suggested again. Keyed by (user, type, external id).
+type RejectedRec struct {
+	ID         uint   `gorm:"primaryKey"`
+	UserID     uint   `gorm:"not null;index:idx_user_rec,unique"`
+	Type       string `gorm:"type:varchar(10);not null;index:idx_user_rec,unique"` // "TV" | "BOOK"
+	ExternalID string `gorm:"not null;index:idx_user_rec,unique"`
+	CreatedAt  time.Time
+}
+
 // ImportJob tracks a TV Time CSV import.
 type ImportJob struct {
 	ID         uint   `gorm:"primaryKey"`
@@ -104,5 +114,6 @@ func All() []any {
 		&Book{},
 		&ImportJob{},
 		&SyncLog{},
+		&RejectedRec{},
 	}
 }

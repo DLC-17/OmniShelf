@@ -32,6 +32,7 @@ type TMDB interface {
 	SearchTV(ctx context.Context, query string) (*tmdb.SearchResponse, error)
 	GetShow(ctx context.Context, id int) (*tmdb.Show, error)
 	GetSeason(ctx context.Context, showID, seasonNum int) (*tmdb.Season, error)
+	Recommendations(ctx context.Context, showID int) (*tmdb.SearchResponse, error)
 }
 
 // ImageStore is the subset of *images.Store the service needs.
@@ -284,6 +285,110 @@ func (s *Service) trackShow(ctx context.Context, userID uint, externalID string,
 		return nil, &ConflictError{Existing: existing}
 	}
 	return &AddResult{Show: show, Item: item}, nil
+}
+
+// DiscoverItem is one recommendation for the Discover page: a TMDB show the
+// user does not track yet, tagged with the tracked show it was suggested from.
+type DiscoverItem struct {
+	TMDBID       int
+	Title        string
+	Overview     string
+	PosterPath   string // raw TMDB path (not cached; the UI thumbnails it)
+	FirstAirDate string
+	SuggestedBy  string // title of the tracked show this came from
+}
+
+const (
+	maxDiscoverSources = 5  // tracked shows to pull recommendations from
+	maxDiscoverResults = 24 // total suggestions returned
+)
+
+// Discover suggests TV shows based on what the user already tracks. It pulls
+// TMDB recommendations for the user's most recently updated shows, excludes
+// anything already tracked or previously rejected, dedupes, and tags each with
+// the show it was suggested from. A failing source is skipped, not fatal.
+func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, error) {
+	var sources []models.TrackingItem
+	if err := s.db.WithContext(ctx).
+		Where("user_id = ? AND type = ?", userID, "TV").
+		Order("updated_at DESC").Limit(maxDiscoverSources).
+		Find(&sources).Error; err != nil {
+		return nil, fmt.Errorf("tv: discover sources: %w", err)
+	}
+	if len(sources) == 0 {
+		return []DiscoverItem{}, nil
+	}
+
+	tracked, err := s.tvExternalIDSet(ctx, userID, &models.TrackingItem{})
+	if err != nil {
+		return nil, err
+	}
+	rejected, err := s.tvExternalIDSet(ctx, userID, &models.RejectedRec{})
+	if err != nil {
+		return nil, err
+	}
+
+	seen := map[int]bool{}
+	out := make([]DiscoverItem, 0, maxDiscoverResults)
+	for _, src := range sources {
+		if len(out) >= maxDiscoverResults {
+			break
+		}
+		srcID, convErr := strconv.Atoi(src.ExternalID)
+		if convErr != nil {
+			continue
+		}
+		resp, recErr := s.tmdb.Recommendations(ctx, srcID)
+		if recErr != nil {
+			log.Printf("tv: recommendations for %d: %v", srcID, recErr)
+			continue
+		}
+		for _, r := range resp.Results {
+			if len(out) >= maxDiscoverResults {
+				break
+			}
+			if tracked[r.ID] || rejected[r.ID] || seen[r.ID] {
+				continue
+			}
+			seen[r.ID] = true
+			out = append(out, DiscoverItem{
+				TMDBID:       r.ID,
+				Title:        r.Name,
+				Overview:     r.Overview,
+				PosterPath:   r.PosterPath,
+				FirstAirDate: r.FirstAirDate,
+				SuggestedBy:  src.Title,
+			})
+		}
+	}
+	return out, nil
+}
+
+// tvExternalIDSet loads the user's TV external IDs from the given model
+// (TrackingItem or RejectedRec) as a set of TMDB IDs.
+func (s *Service) tvExternalIDSet(ctx context.Context, userID uint, model any) (map[int]bool, error) {
+	var rows []struct{ ExternalID string }
+	if err := s.db.WithContext(ctx).Model(model).
+		Where("user_id = ? AND type = ?", userID, "TV").
+		Select("external_id").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("tv: load external ids: %w", err)
+	}
+	set := make(map[int]bool, len(rows))
+	for _, r := range rows {
+		if id, err := strconv.Atoi(r.ExternalID); err == nil {
+			set[id] = true
+		}
+	}
+	return set, nil
+}
+
+// RejectRec hides a TV suggestion so Discover will not surface it again.
+func (s *Service) RejectRec(ctx context.Context, userID uint, tmdbID int) error {
+	rec := models.RejectedRec{UserID: userID, Type: "TV", ExternalID: strconv.Itoa(tmdbID)}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rec).Error; err != nil {
+		return fmt.Errorf("tv: reject recommendation: %w", err)
+	}
+	return nil
 }
 
 // UpNextEntry is one Up Next card: a WATCHING show and its earliest aired,

@@ -14,6 +14,9 @@ export default function Layout() {
         <NavLink to="/" className={navLinkClass} end>
           Up Next
         </NavLink>
+        <NavLink to="/discover" className={navLinkClass}>
+          Discover
+        </NavLink>
         <NavLink to="/library" className={navLinkClass}>
           Library
         </NavLink>

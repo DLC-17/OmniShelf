@@ -160,6 +160,16 @@ func (c *Client) GetShow(ctx context.Context, id int) (*Show, error) {
 	return &out, nil
 }
 
+// Recommendations returns TMDB's "recommended" TV shows for a given show,
+// in the same shape as a search result.
+func (c *Client) Recommendations(ctx context.Context, showID int) (*SearchResponse, error) {
+	var out SearchResponse
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d/recommendations", showID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // GetSeason fetches one season of a show with its full episode list
 // (including air dates).
 func (c *Client) GetSeason(ctx context.Context, showID, seasonNum int) (*Season, error) {

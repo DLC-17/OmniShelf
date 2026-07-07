@@ -28,6 +28,8 @@ func RegisterTVRoutes(grp *gin.RouterGroup, svc *tv.Service) {
 	grp.GET("/tv/search", h.search)
 	grp.POST("/tv/shows", h.addShow)
 	grp.GET("/tv/up-next", h.upNext)
+	grp.GET("/tv/discover", h.discover)
+	grp.POST("/tv/discover/reject", h.rejectRec)
 	grp.GET("/tv/shows/:id/episodes", h.listEpisodes)
 	grp.POST("/tv/episodes/:id/watch", h.markWatched)
 	grp.POST("/tv/episodes/:id/rewatch", h.rewatch)
@@ -169,6 +171,44 @@ func (h *tvHandler) upNext(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+// discover handles GET /api/tv/discover — TV suggestions based on what the
+// user tracks, each tagged with the show it was suggested from.
+func (h *tvHandler) discover(c *gin.Context) {
+	items, err := h.svc.Discover(c.Request.Context(), CurrentUserID(c))
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	out := make([]gin.H, 0, len(items))
+	for _, it := range items {
+		out = append(out, gin.H{
+			"tmdbId":       it.TMDBID,
+			"title":        it.Title,
+			"overview":     it.Overview,
+			"posterPath":   it.PosterPath,
+			"firstAirDate": it.FirstAirDate,
+			"suggestedBy":  it.SuggestedBy,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+// rejectRec handles POST /api/tv/discover/reject {tmdbId} — hide a suggestion.
+func (h *tvHandler) rejectRec(c *gin.Context) {
+	var body struct {
+		TMDBID int `json:"tmdbId"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.TMDBID <= 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "body must include a positive tmdbId")
+		return
+	}
+	if err := h.svc.RejectRec(c.Request.Context(), CurrentUserID(c), body.TMDBID); err != nil {
+		h.writeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // listEpisodes handles GET /api/tv/shows/:id/episodes — every episode of the

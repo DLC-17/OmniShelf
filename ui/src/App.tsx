@@ -11,6 +11,7 @@ import {
 import { setUnauthorizedHandler } from './api/client'
 import Layout from './components/Layout'
 import { useAuth } from './hooks/useAuth'
+import Discover from './pages/Discover'
 import Feed from './pages/Feed'
 import Import from './pages/Import'
 import Library from './pages/Library'
@@ -77,6 +78,7 @@ export function AppRoutes() {
         <Route element={<RequireAuth />}>
           <Route element={<Layout />}>
             <Route path="/" element={<UpNext />} />
+            <Route path="/discover" element={<Discover />} />
             <Route path="/library" element={<Library />} />
             <Route path="/scan" element={<Scan />} />
             <Route path="/feed" element={<Feed />} />

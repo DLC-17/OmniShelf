@@ -22,7 +22,15 @@ import (
 type fakeTMDB struct {
 	shows   map[int]*tmdb.Show
 	seasons map[int]map[int]*tmdb.Season // showID → seasonNumber → season
+	recs    map[int][]tmdb.SearchResult  // showID → recommended shows
 	err     error                        // when set, every call fails with it
+}
+
+func (f *fakeTMDB) Recommendations(_ context.Context, showID int) (*tmdb.SearchResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &tmdb.SearchResponse{Results: f.recs[showID]}, nil
 }
 
 func (f *fakeTMDB) SearchTV(_ context.Context, query string) (*tmdb.SearchResponse, error) {
@@ -551,4 +559,48 @@ func TestAddShowIsDBFirst(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "Fixture Show", res.Show.Title)
 	assert.Equal(t, "WATCHING", res.Item.Status)
+}
+
+// ── Discover ──
+
+func TestDiscoverExcludesTrackedAndRejected(t *testing.T) {
+	fake := twoSeasonShow()
+	// Recommendations for the fixture show (100): three shows, one of which
+	// (200) the user will already track and another (300) will be rejected.
+	fake.recs = map[int][]tmdb.SearchResult{
+		100: {
+			{ID: 200, Name: "Already Tracked"},
+			{ID: 300, Name: "Rejected One"},
+			{ID: 400, Name: "Fresh Suggestion", PosterPath: "/p400.jpg"},
+		},
+	}
+	svc, gdb := newTestService(t, fake, &fakeImages{})
+	addFixtureShow(t, svc) // user tracks show 100
+
+	// User already tracks 200, and has rejected 300.
+	require.NoError(t, gdb.Create(&models.TrackingItem{UserID: userID, Type: "TV", ExternalID: "200", Title: "Already Tracked", Status: "WATCHING"}).Error)
+	require.NoError(t, svc.RejectRec(context.Background(), userID, 300))
+
+	items, err := svc.Discover(context.Background(), userID)
+	require.NoError(t, err)
+	require.Len(t, items, 1, "tracked and rejected suggestions are filtered out")
+	assert.Equal(t, 400, items[0].TMDBID)
+	assert.Equal(t, "Fresh Suggestion", items[0].Title)
+	assert.Equal(t, "Fixture Show", items[0].SuggestedBy, "tagged with the source show")
+}
+
+func TestDiscoverEmptyWithoutTracking(t *testing.T) {
+	svc, _ := newTestService(t, twoSeasonShow(), &fakeImages{})
+	items, err := svc.Discover(context.Background(), userID)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+func TestRejectRecIsIdempotent(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	require.NoError(t, svc.RejectRec(context.Background(), userID, 500))
+	require.NoError(t, svc.RejectRec(context.Background(), userID, 500))
+	var n int64
+	require.NoError(t, gdb.Model(&models.RejectedRec{}).Where("user_id = ? AND external_id = ?", userID, "500").Count(&n).Error)
+	assert.EqualValues(t, 1, n)
 }
