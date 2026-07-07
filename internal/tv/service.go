@@ -406,7 +406,7 @@ func (s *Service) UpNext(ctx context.Context, userID uint) ([]UpNextEntry, error
 	var items []models.TrackingItem
 	if err := s.db.WithContext(ctx).
 		Where("user_id = ? AND type = ? AND status = ?", userID, "TV", "WATCHING").
-		Order("title").
+		Order("title COLLATE NOCASE").
 		Find(&items).Error; err != nil {
 		return nil, fmt.Errorf("tv: list watching items: %w", err)
 	}

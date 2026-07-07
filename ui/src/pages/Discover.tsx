@@ -58,7 +58,7 @@ export default function Discover() {
   })
   const busy = add.isPending || reject.isPending
 
-  const items = discover.data ?? []
+  const items = [...(discover.data ?? [])].sort((a, b) => a.title.localeCompare(b.title))
 
   return (
     <section>

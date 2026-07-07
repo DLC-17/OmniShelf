@@ -44,7 +44,7 @@ func (h *usersHandler) list(c *gin.Context) {
 	ctx := c.Request.Context()
 
 	var users []models.User
-	if err := h.db.WithContext(ctx).Order("id").Find(&users).Error; err != nil {
+	if err := h.db.WithContext(ctx).Order("username COLLATE NOCASE").Find(&users).Error; err != nil {
 		Error(c, http.StatusInternalServerError, CodeInternal, "loading users")
 		return
 	}
@@ -133,7 +133,7 @@ func (h *usersHandler) library(c *gin.Context) {
 	}
 
 	var items []models.TrackingItem
-	if err := q.Order("updated_at DESC, id DESC").Find(&items).Error; err != nil {
+	if err := q.Order("title COLLATE NOCASE, id").Find(&items).Error; err != nil {
 		Error(c, http.StatusInternalServerError, CodeInternal, "loading library")
 		return
 	}

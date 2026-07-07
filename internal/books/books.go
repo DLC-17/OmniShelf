@@ -248,7 +248,7 @@ func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string
 	}
 
 	items := []models.TrackingItem{}
-	if err := q.Order("updated_at DESC, id DESC").Find(&items).Error; err != nil {
+	if err := q.Order("title COLLATE NOCASE, id").Find(&items).Error; err != nil {
 		return nil, fmt.Errorf("listing items for user %d: %w", userID, err)
 	}
 	return items, nil

@@ -93,7 +93,7 @@ func TestUserLibraryReadOnlyView(t *testing.T) {
 
 	all := fetch("")
 	require.Len(t, all, 2)
-	// Newest first; every field of the shared item shape is populated.
+	// Alphabetical by title; every field of the shared item shape is populated.
 	assert.Equal(t, "Dune", all[0].Title)
 	assert.Equal(t, "BOOK", all[0].Type)
 	assert.Equal(t, "9780441172719", all[0].ExternalID)
