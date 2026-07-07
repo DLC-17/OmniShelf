@@ -145,6 +145,24 @@ func (s *Service) AddShow(ctx context.Context, userID uint, tmdbID int) (*AddRes
 		return nil, fmt.Errorf("tv: duplicate check: %w", err)
 	}
 
+	// DB-first: if this show is already in the shared cache with its episodes,
+	// reuse it and skip the TMDB round-trips. The nightly sync keeps cached
+	// metadata fresh, so a re-add never needs to re-fetch.
+	var cached models.Show
+	cacheErr := s.db.WithContext(ctx).Where("tmdb_id = ?", tmdbID).First(&cached).Error
+	if cacheErr == nil {
+		var epCount int64
+		if err := s.db.WithContext(ctx).Model(&models.Episode{}).
+			Where("show_id = ?", cached.ID).Count(&epCount).Error; err != nil {
+			return nil, fmt.Errorf("tv: count cached episodes: %w", err)
+		}
+		if epCount > 0 {
+			return s.trackShow(ctx, userID, externalID, cached)
+		}
+	} else if !errors.Is(cacheErr, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("tv: cache lookup: %w", cacheErr)
+	}
+
 	// Fetch everything from TMDB before touching the DB so an upstream
 	// failure mid-way never leaves a half-imported show.
 	detail, err := s.tmdb.GetShow(ctx, tmdbID)
@@ -239,6 +257,32 @@ func (s *Service) AddShow(ctx context.Context, userID uint, tmdbID int) (*AddRes
 		}
 	}
 
+	return &AddResult{Show: show, Item: item}, nil
+}
+
+// trackShow creates the user's WATCHING TrackingItem for an already-cached
+// show (the DB-first path). A concurrent duplicate surfaces as *ConflictError.
+func (s *Service) trackShow(ctx context.Context, userID uint, externalID string, show models.Show) (*AddResult, error) {
+	item := models.TrackingItem{
+		UserID:     userID,
+		Type:       "TV",
+		ExternalID: externalID,
+		Title:      show.Title,
+		Status:     "WATCHING",
+	}
+	res := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&item)
+	if res.Error != nil {
+		return nil, fmt.Errorf("tv: create tracking item: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		var existing models.TrackingItem
+		if err := s.db.WithContext(ctx).
+			Where("user_id = ? AND type = ? AND external_id = ?", userID, "TV", externalID).
+			First(&existing).Error; err != nil {
+			return nil, fmt.Errorf("tv: load conflicting item: %w", err)
+		}
+		return nil, &ConflictError{Existing: existing}
+	}
 	return &AddResult{Show: show, Item: item}, nil
 }
 

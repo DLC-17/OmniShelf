@@ -109,6 +109,17 @@ func (s *Service) Scan(ctx context.Context, isbn string) (*models.Book, error) {
 		return nil, err
 	}
 
+	// DB-first: if this ISBN is already in the shared Book cache, return it
+	// without an OpenLibrary round-trip (and without spending its rate limit).
+	var cached models.Book
+	err = s.db.WithContext(ctx).Where(&models.Book{ISBN13: norm}).First(&cached).Error
+	if err == nil {
+		return &cached, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("looking up cached book %s: %w", norm, err)
+	}
+
 	meta, err := s.metadata.GetByISBN(ctx, norm)
 	if err != nil {
 		if errors.Is(err, openlibrary.ErrNotFound) {

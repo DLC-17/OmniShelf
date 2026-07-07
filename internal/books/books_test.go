@@ -156,9 +156,9 @@ func TestScanPartialMetadata(t *testing.T) {
 	assert.Empty(t, imgs.fetched, "no cover ID means no download attempt")
 }
 
-// Re-scanning upserts: one row, refreshed fields, cached cover kept when the
-// new download fails.
-func TestScanUpsertKeepsExistingCover(t *testing.T) {
+// Re-scanning is DB-first: the cached row is returned as-is (no OpenLibrary
+// refresh) and is never duplicated.
+func TestRescanReturnsCachedRow(t *testing.T) {
 	meta := &fakeMetadata{books: map[string]*openlibrary.Book{testISBN: fullMeta()}}
 	imgs := &fakeImages{}
 	svc, gdb := newTestService(t, meta, imgs)
@@ -167,14 +167,14 @@ func TestScanUpsertKeepsExistingCover(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, first.CoverPath)
 
+	// Upstream metadata changes, but a DB-first re-scan ignores it.
 	meta.books[testISBN].Title = "Networking Basics, 2nd Ed."
-	imgs.err = errors.New("cover host down")
 	second, err := svc.Scan(context.Background(), testISBN)
 	require.NoError(t, err)
 
-	assert.Equal(t, first.ID, second.ID, "must update, not duplicate")
-	assert.Equal(t, "Networking Basics, 2nd Ed.", second.Title)
-	assert.Equal(t, first.CoverPath, second.CoverPath, "existing cover survives a failed re-download")
+	assert.Equal(t, first.ID, second.ID, "must not duplicate")
+	assert.Equal(t, "Networking Basics", second.Title, "cached row returned unchanged")
+	assert.Equal(t, first.CoverPath, second.CoverPath)
 
 	var n int64
 	require.NoError(t, gdb.Model(&models.Book{}).Count(&n).Error)
@@ -348,4 +348,21 @@ func TestDeleteTVItemRemovesWatchesKeepsEpisodes(t *testing.T) {
 	assert.EqualValues(t, 1, shows, "shared show metadata must stay")
 
 	assert.ErrorIs(t, gdb.First(&models.TrackingItem{}, item.ID).Error, gorm.ErrRecordNotFound)
+}
+
+// TestScanIsDBFirst proves a cached ISBN is served from the DB without any
+// OpenLibrary call: the second scan succeeds even though metadata now errors.
+func TestScanIsDBFirst(t *testing.T) {
+	meta := &fakeMetadata{books: map[string]*openlibrary.Book{testISBN: fullMeta()}}
+	svc, _ := newTestService(t, meta, &fakeImages{})
+
+	first, err := svc.Scan(context.Background(), testISBN)
+	require.NoError(t, err)
+
+	// Break the metadata client; a cached ISBN must still resolve.
+	meta.err = errors.New("openlibrary must not be called for a cached ISBN")
+	second, err := svc.Scan(context.Background(), testISBN)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, second.ID)
+	assert.Equal(t, "Networking Basics", second.Title)
 }

@@ -536,3 +536,19 @@ func TestUpNextByRecencyBuckets(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, recent, "no longer recent")
 }
+
+// TestAddShowIsDBFirst proves a cached show is tracked without a TMDB call:
+// once user 1 has added it, user 2 adds it even though TMDB now errors.
+func TestAddShowIsDBFirst(t *testing.T) {
+	fake := twoSeasonShow()
+	svc, _ := newTestService(t, fake, &fakeImages{})
+
+	_, err := svc.AddShow(context.Background(), userID, 100)
+	require.NoError(t, err)
+
+	fake.err = errors.New("tmdb must not be called for a cached show")
+	res, err := svc.AddShow(context.Background(), userID+1, 100)
+	require.NoError(t, err)
+	assert.Equal(t, "Fixture Show", res.Show.Title)
+	assert.Equal(t, "WATCHING", res.Item.Status)
+}
