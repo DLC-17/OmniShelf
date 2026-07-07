@@ -3,10 +3,10 @@ import { request } from './client'
 export type MediaType = 'TV' | 'BOOK'
 
 /** All statuses across both media types; per-type validity is enforced server-side. */
-export type ItemStatus = 'WATCHING' | 'READING' | 'PLAN_TO' | 'COMPLETED'
+export type ItemStatus = 'WATCHING' | 'READING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
 
-export const TV_STATUSES: ItemStatus[] = ['WATCHING', 'COMPLETED', 'PLAN_TO']
-export const BOOK_STATUSES: ItemStatus[] = ['READING', 'COMPLETED', 'PLAN_TO']
+export const TV_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
+export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 
 export interface LibraryItem {
   id: number
@@ -20,6 +20,8 @@ export interface LibraryItem {
   rating: number
   /** Relative /images path for the poster/cover; '' = show a placeholder. */
   artworkPath: string
+  /** Internal show id for TV items (0 for books); used by the episode picker. */
+  showId: number
   /** Books only. */
   authors: string
   pageCount: number

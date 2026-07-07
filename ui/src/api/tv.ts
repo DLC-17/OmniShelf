@@ -104,6 +104,15 @@ export async function watchThroughEpisode(episodeId: number): Promise<Episode | 
   return res.nextUp
 }
 
+/** Marks every aired episode of a whole season watched; returns the new next-up. */
+export async function watchSeason(showId: number, season: number): Promise<Episode | null> {
+  const res = await request<{ nextUp: Episode | null }>(
+    `/api/tv/shows/${showId}/seasons/${season}/watch`,
+    { method: 'POST' },
+  )
+  return res.nextUp
+}
+
 /** Removes the watch mark; returns the show's new next-up episode (null when none). */
 export async function unmarkWatched(episodeId: number): Promise<Episode | null> {
   const res = await request<{ nextUp: Episode | null }>(`/api/tv/episodes/${episodeId}/watch`, {

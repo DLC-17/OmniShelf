@@ -4,6 +4,7 @@ import {
   markWatched,
   rewatchEpisode,
   unmarkWatched,
+  watchSeason,
   watchThroughEpisode,
 } from '../api/tv'
 import type { EpisodeWatchState } from '../api/tv'
@@ -35,6 +36,7 @@ export function useEpisodeActions(showId: number) {
   const rewatch = useMutation({ mutationFn: (id: number) => rewatchEpisode(id), onSuccess })
   const watchThrough = useMutation({ mutationFn: (id: number) => watchThroughEpisode(id), onSuccess })
   const unwatch = useMutation({ mutationFn: (id: number) => unmarkWatched(id), onSuccess })
+  const markSeason = useMutation({ mutationFn: (season: number) => watchSeason(showId, season), onSuccess })
 
-  return { watch, rewatch, watchThrough, unwatch }
+  return { watch, rewatch, watchThrough, unwatch, markSeason }
 }

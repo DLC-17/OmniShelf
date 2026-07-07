@@ -32,12 +32,14 @@ const (
 	TypeBook = "BOOK"
 )
 
-// Tracking statuses. Books use READING; TV uses WATCHING.
+// Tracking statuses. Books use READING; TV uses WATCHING. COMPLETED, PLAN_TO
+// ("not started") and STOPPED (dropped) apply to both.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
 	StatusCompleted = "COMPLETED"
 	StatusPlanTo    = "PLAN_TO"
+	StatusStopped   = "STOPPED"
 )
 
 // Sentinel errors translated by the API layer into envelope responses.
@@ -257,6 +259,7 @@ func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string
 type LibraryEntry struct {
 	Item        models.TrackingItem
 	ArtworkPath string // relative /images path; "" = placeholder
+	ShowID      uint   // internal Show.ID for TV items (0 for books)
 	Authors     string // books only
 	PageCount   int    // books only
 	Description string // books only
@@ -313,6 +316,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		case TypeTV:
 			if sh, ok := shows[it.ExternalID]; ok {
 				entry.ArtworkPath = sh.PosterPath
+				entry.ShowID = sh.ID
 			}
 		case TypeBook:
 			if b, ok := booksByISBN[it.ExternalID]; ok {
@@ -437,7 +441,7 @@ func (s *Service) userItem(ctx context.Context, userID, itemID uint) (*models.Tr
 // TV → WATCHING/COMPLETED/PLAN_TO, BOOK → READING/COMPLETED/PLAN_TO.
 func validStatus(typ, status string) bool {
 	switch status {
-	case StatusCompleted, StatusPlanTo:
+	case StatusCompleted, StatusPlanTo, StatusStopped:
 		return true
 	case StatusWatching:
 		return typ == TypeTV

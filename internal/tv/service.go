@@ -659,6 +659,31 @@ func (s *Service) WatchThrough(ctx context.Context, userID, episodeID uint) (*mo
 	return s.nextUp(ctx, userID, target.ShowID)
 }
 
+// WatchSeason marks every aired episode of one season of a show as watched in
+// a single action. Already-watched episodes keep their timestamps. Returns the
+// show's new next-up episode.
+func (s *Service) WatchSeason(ctx context.Context, userID, showID uint, season int) (*models.Episode, error) {
+	now := time.Now()
+	var eps []models.Episode
+	if err := s.db.WithContext(ctx).
+		Where("show_id = ? AND season = ? AND air_date IS NOT NULL AND air_date <= ?", showID, season, now).
+		Find(&eps).Error; err != nil {
+		return nil, fmt.Errorf("tv: watch-season query: %w", err)
+	}
+	rows := make([]models.EpisodeWatch, 0, len(eps))
+	for _, e := range eps {
+		rows = append(rows, models.EpisodeWatch{UserID: userID, EpisodeID: e.ID, WatchedAt: now})
+	}
+	if len(rows) > 0 {
+		if err := s.db.WithContext(ctx).
+			Clauses(clause.OnConflict{DoNothing: true}).
+			Create(&rows).Error; err != nil {
+			return nil, fmt.Errorf("tv: watch-season insert: %w", err)
+		}
+	}
+	return s.nextUp(ctx, userID, showID)
+}
+
 // episode loads an episode by ID, mapping a missing row to ErrNotFound.
 func (s *Service) episode(ctx context.Context, id uint) (*models.Episode, error) {
 	var ep models.Episode

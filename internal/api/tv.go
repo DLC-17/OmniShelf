@@ -31,6 +31,7 @@ func RegisterTVRoutes(grp *gin.RouterGroup, svc *tv.Service) {
 	grp.GET("/tv/discover", h.discover)
 	grp.POST("/tv/discover/reject", h.rejectRec)
 	grp.GET("/tv/shows/:id/episodes", h.listEpisodes)
+	grp.POST("/tv/shows/:id/seasons/:season/watch", h.watchSeason)
 	grp.POST("/tv/episodes/:id/watch", h.markWatched)
 	grp.POST("/tv/episodes/:id/rewatch", h.rewatch)
 	grp.POST("/tv/episodes/:id/watch-through", h.watchThrough)
@@ -234,6 +235,32 @@ func (h *tvHandler) listEpisodes(c *gin.Context) {
 		episodes = append(episodes, dto)
 	}
 	c.JSON(http.StatusOK, gin.H{"episodes": episodes})
+}
+
+// watchSeason handles POST /api/tv/shows/:id/seasons/:season/watch — mark every
+// aired episode of the season watched. Responds with the show's new next-up.
+func (h *tvHandler) watchSeason(c *gin.Context) {
+	showID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || showID == 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "show id must be a positive integer")
+		return
+	}
+	season, err := strconv.Atoi(c.Param("season"))
+	if err != nil || season < 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "season must be a non-negative integer")
+		return
+	}
+	next, err := h.svc.WatchSeason(c.Request.Context(), CurrentUserID(c), uint(showID), season)
+	if err != nil {
+		h.writeError(c, err)
+		return
+	}
+	if next == nil {
+		c.JSON(http.StatusOK, gin.H{"nextUp": nil})
+		return
+	}
+	dto := toEpisodeDTO(*next)
+	c.JSON(http.StatusOK, gin.H{"nextUp": dto})
 }
 
 // markWatched handles POST /api/tv/episodes/:id/watch. The response carries

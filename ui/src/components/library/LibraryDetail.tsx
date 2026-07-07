@@ -3,6 +3,7 @@ import { ApiError } from '../../api/client'
 import { BOOK_STATUSES, TV_STATUSES } from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { useDeleteItem, useUpdateItem } from '../../hooks/useLibrary'
+import EpisodeList from '../tv/EpisodeList'
 import Poster from '../tv/Poster'
 import RatingStars from './RatingStars'
 
@@ -127,6 +128,13 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
         )}
         {isBook && item.description === '' && (
           <p className="muted detail-summary">No summary available.</p>
+        )}
+
+        {!isBook && item.showId > 0 && (
+          <div className="detail-summary">
+            <h3>Episodes</h3>
+            <EpisodeList showId={item.showId} />
+          </div>
         )}
 
         {error !== null && (

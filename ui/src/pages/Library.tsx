@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../api/client'
-import type { LibraryItem, MediaType } from '../api/library'
+import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
 import Poster from '../components/tv/Poster'
 import { useLibrary } from '../hooks/useLibrary'
@@ -12,6 +12,17 @@ const TABS: { value: MediaTab; label: string }[] = [
   { value: 'BOOK', label: 'Books' },
   { value: 'MOVIE', label: 'Movies' },
 ]
+
+/** Status sections shown in order, with media-specific labels. */
+function sectionsFor(media: MediaType): { status: ItemStatus; label: string }[] {
+  const isBook = media === 'BOOK'
+  return [
+    { status: isBook ? 'READING' : 'WATCHING', label: isBook ? 'Reading' : 'Watching' },
+    { status: 'PLAN_TO', label: 'Not started' },
+    { status: 'COMPLETED', label: 'Completed' },
+    { status: 'STOPPED', label: isBook ? 'Stopped reading' : 'Stopped watching' },
+  ]
+}
 
 /**
  * Library shelf: a cover-art grid toggled between TV shows, books, and movies
@@ -70,23 +81,34 @@ export default function Library() {
         </p>
       )}
 
-      {!isMovie && items.length > 0 && (
-        <ul className="cover-grid">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                className="cover-tile"
-                aria-label={`Open ${item.title}`}
-                onClick={() => setSelectedId(item.id)}
-              >
-                <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
-                <span className="cover-title">{item.title}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {!isMovie &&
+        items.length > 0 &&
+        sectionsFor(media as MediaType).map(({ status, label }) => {
+          const sectionItems = items.filter((i) => i.status === status)
+          if (sectionItems.length === 0) return null
+          return (
+            <section key={status} className="library-section">
+              <h2 className="library-section-title">
+                {label} <span className="badge">{sectionItems.length}</span>
+              </h2>
+              <ul className="cover-grid">
+                {sectionItems.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className="cover-tile"
+                      aria-label={`Open ${item.title}`}
+                      onClick={() => setSelectedId(item.id)}
+                    >
+                      <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
+                      <span className="cover-title">{item.title}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )
+        })}
 
       {selected !== null && (
         <LibraryDetail item={selected} onClose={() => setSelectedId(null)} />

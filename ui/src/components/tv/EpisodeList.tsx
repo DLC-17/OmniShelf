@@ -42,7 +42,8 @@ export default function EpisodeList({ showId }: EpisodeListProps) {
     actions.watch.isPending ||
     actions.rewatch.isPending ||
     actions.watchThrough.isPending ||
-    actions.unwatch.isPending
+    actions.unwatch.isPending ||
+    actions.markSeason.isPending
 
   if (episodes.isPending) {
     return <p className="muted">Loading episodes…</p>
@@ -73,18 +74,29 @@ export default function EpisodeList({ showId }: EpisodeListProps) {
         const watchedCount = eps.filter((e) => e.watched).length
         return (
         <div key={season} className="episode-season">
-          <button
-            type="button"
-            className="episode-season-toggle"
-            aria-expanded={open}
-            onClick={() => toggleSeason(season)}
-          >
-            <span className="show-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
-            <span className="episode-season-title">Season {season}</span>
-            <span className="badge">
-              {watchedCount}/{eps.length}
-            </span>
-          </button>
+          <div className="episode-season-head">
+            <button
+              type="button"
+              className="episode-season-toggle"
+              aria-expanded={open}
+              onClick={() => toggleSeason(season)}
+            >
+              <span className="show-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+              <span className="episode-season-title">Season {season}</span>
+              <span className="badge">
+                {watchedCount}/{eps.length}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="btn-confirm"
+              disabled={busy || watchedCount === eps.length}
+              aria-label={`Mark season ${season} watched`}
+              onClick={() => actions.markSeason.mutate(season)}
+            >
+              Mark season
+            </button>
+          </div>
           {open && (
           <ul className="episode-rows">
             {eps.map((ep) => {

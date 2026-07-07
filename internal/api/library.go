@@ -39,6 +39,7 @@ type itemResponse struct {
 	Progress    int       `json:"progress"`
 	Rating      int       `json:"rating"`
 	ArtworkPath string    `json:"artworkPath"`
+	ShowID      uint      `json:"showId"`
 	Authors     string    `json:"authors"`
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
@@ -61,6 +62,7 @@ func toItemResponse(item *models.TrackingItem) itemResponse {
 func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r := toItemResponse(&e.Item)
 	r.ArtworkPath = e.ArtworkPath
+	r.ShowID = e.ShowID
 	r.Authors = e.Authors
 	r.PageCount = e.PageCount
 	r.Description = e.Description

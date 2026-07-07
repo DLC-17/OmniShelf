@@ -565,6 +565,37 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* ---------- Library sections ---------- */
+
+.library-section {
+  margin-top: 1.75rem;
+}
+.library-section-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.episode-season-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.episode-season-head .episode-season-toggle {
+  flex: 1;
+}
+.episode-season-head > button:last-child {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
 /* ---------- Library cover grid ---------- */
 
 .cover-grid {

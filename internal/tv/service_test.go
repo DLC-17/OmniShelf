@@ -604,3 +604,22 @@ func TestRejectRecIsIdempotent(t *testing.T) {
 	require.NoError(t, gdb.Model(&models.RejectedRec{}).Where("user_id = ? AND external_id = ?", userID, "500").Count(&n).Error)
 	assert.EqualValues(t, 1, n)
 }
+
+func TestWatchSeasonMarksAllAiredInSeason(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc)
+
+	// Season 2 has one aired episode (S2E1); S2E2 (future) and S2E3 (no air
+	// date) must be left alone.
+	_, err := svc.WatchSeason(context.Background(), userID, res.Show.ID, 2)
+	require.NoError(t, err)
+	var count int64
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).Where("user_id = ?", userID).Count(&count).Error)
+	assert.EqualValues(t, 1, count, "only aired episodes in the season are marked")
+
+	// Season 1: both aired episodes marked (total now 3).
+	_, err = svc.WatchSeason(context.Background(), userID, res.Show.ID, 1)
+	require.NoError(t, err)
+	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).Where("user_id = ?", userID).Count(&count).Error)
+	assert.EqualValues(t, 3, count)
+}

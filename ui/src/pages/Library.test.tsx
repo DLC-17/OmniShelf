@@ -90,6 +90,8 @@ describe('Library page', () => {
     renderApp('/library')
     const user = userEvent.setup()
 
+    // Books live under the Books tab (grouped by status within each media).
+    await user.click(await screen.findByRole('tab', { name: /books/i }))
     await user.click(await screen.findByRole('button', { name: /open a game of thrones/i }))
     const page = await screen.findByLabelText(/page for a game of thrones/i)
     await user.clear(page)
