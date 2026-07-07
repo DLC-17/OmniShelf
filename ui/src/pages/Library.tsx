@@ -32,6 +32,15 @@ function sectionsFor(media: MediaType): { status: ItemStatus; label: string }[] 
 export default function Library() {
   const [media, setMedia] = useState<MediaTab>('TV')
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [collapsed, setCollapsed] = useState<Set<ItemStatus>>(new Set())
+
+  const toggleSection = (status: ItemStatus) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(status)) next.delete(status)
+      else next.add(status)
+      return next
+    })
 
   const isMovie = media === 'MOVIE'
   const library = useLibrary({ type: isMovie ? '' : media }, !isMovie)
@@ -86,26 +95,35 @@ export default function Library() {
         sectionsFor(media as MediaType).map(({ status, label }) => {
           const sectionItems = items.filter((i) => i.status === status)
           if (sectionItems.length === 0) return null
+          const open = !collapsed.has(status)
           return (
             <section key={status} className="library-section">
-              <h2 className="library-section-title">
+              <button
+                type="button"
+                className="library-section-title"
+                aria-expanded={open}
+                onClick={() => toggleSection(status)}
+              >
+                <span className="show-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
                 {label} <span className="badge">{sectionItems.length}</span>
-              </h2>
-              <ul className="cover-grid">
-                {sectionItems.map((item) => (
-                  <li key={item.id}>
-                    <button
-                      type="button"
-                      className="cover-tile"
-                      aria-label={`Open ${item.title}`}
-                      onClick={() => setSelectedId(item.id)}
-                    >
-                      <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
-                      <span className="cover-title">{item.title}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              </button>
+              {open && (
+                <ul className="cover-grid">
+                  {sectionItems.map((item) => (
+                    <li key={item.id}>
+                      <button
+                        type="button"
+                        className="cover-tile"
+                        aria-label={`Open ${item.title}`}
+                        onClick={() => setSelectedId(item.id)}
+                      >
+                        <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
+                        <span className="cover-title">{item.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </section>
           )
         })}

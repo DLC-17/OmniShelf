@@ -154,12 +154,14 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 }
 
 // collectShowIDs returns the distinct TMDB IDs of every show any user tracks
-// with status WATCHING or PLAN_TO, sorted for deterministic runs.
+// with status WATCHING, PLAN_TO or COMPLETED, sorted for deterministic runs.
+// COMPLETED shows are included so a newly aired episode is detected and can
+// bump the show back to WATCHING.
 func (e *Engine) collectShowIDs(ctx context.Context) ([]int, error) {
 	var externalIDs []string
 	err := e.db.WithContext(ctx).
 		Model(&models.TrackingItem{}).
-		Where("type = ? AND status IN ?", "TV", []string{"WATCHING", "PLAN_TO"}).
+		Where("type = ? AND status IN ?", "TV", []string{"WATCHING", "PLAN_TO", "COMPLETED"}).
 		Distinct().
 		Pluck("external_id", &externalIDs).Error
 	if err != nil {
@@ -228,11 +230,13 @@ func (e *Engine) syncShow(ctx context.Context, tmdbID int) error {
 		}
 	}
 
+	var syncedShowID uint
 	txErr := e.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		showRow, upErr := upsertShow(tx, tmdbID, remote, posterRel)
 		if upErr != nil {
 			return upErr
 		}
+		syncedShowID = showRow.ID
 		if upErr := upsertEpisodes(tx, showRow.ID, upstream); upErr != nil {
 			return upErr
 		}
@@ -241,7 +245,41 @@ func (e *Engine) syncShow(ctx context.Context, tmdbID int) error {
 	if txErr != nil {
 		return fmt.Errorf("persist: %w", txErr)
 	}
+
+	// A newly aired episode means anyone who had this show COMPLETED is no
+	// longer caught up: bump them back to WATCHING.
+	if recErr := reconcileCompletedToWatching(e.db.WithContext(ctx), syncedShowID, tmdbID); recErr != nil {
+		return fmt.Errorf("reconcile completed shows: %w", recErr)
+	}
 	return errors.Join(seasonErrs...)
+}
+
+// reconcileCompletedToWatching flips a show's COMPLETED trackers back to
+// WATCHING for any user who now has an aired, unwatched episode of it.
+func reconcileCompletedToWatching(db *gorm.DB, showID uint, tmdbID int) error {
+	var items []models.TrackingItem
+	if err := db.
+		Where("type = ? AND external_id = ? AND status = ?", "TV", strconv.Itoa(tmdbID), "COMPLETED").
+		Find(&items).Error; err != nil {
+		return fmt.Errorf("load completed trackers: %w", err)
+	}
+	now := time.Now()
+	for _, it := range items {
+		var count int64
+		if err := db.Model(&models.Episode{}).
+			Where("show_id = ? AND air_date IS NOT NULL AND air_date <= ?", showID, now).
+			Where("NOT EXISTS (SELECT 1 FROM episode_watches w WHERE w.episode_id = episodes.id AND w.user_id = ?)", it.UserID).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("count unwatched for user %d: %w", it.UserID, err)
+		}
+		if count > 0 {
+			if err := db.Model(&models.TrackingItem{}).Where("id = ?", it.ID).
+				Update("status", "WATCHING").Error; err != nil {
+				return fmt.Errorf("bump user %d to WATCHING: %w", it.UserID, err)
+			}
+		}
+	}
+	return nil
 }
 
 // upsertShow creates or updates the shared Show metadata row, always bumping

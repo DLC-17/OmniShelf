@@ -524,6 +524,58 @@ func (s *Service) lastWatchByShow(ctx context.Context, userID uint) (map[uint]ti
 	return last, nil
 }
 
+// nextUpAndReconcile computes the show's next-up episode and, as a side effect,
+// reconciles the user's tracking status: caught up (no aired unwatched episode)
+// flips WATCHING → COMPLETED; a newly available episode flips COMPLETED →
+// WATCHING. Other statuses (PLAN_TO, STOPPED) are left untouched.
+func (s *Service) nextUpAndReconcile(ctx context.Context, userID, showID uint) (*models.Episode, error) {
+	next, err := s.nextUp(ctx, userID, showID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.reconcileStatus(ctx, userID, showID, next); err != nil {
+		return nil, err
+	}
+	return next, nil
+}
+
+// reconcileStatus flips the user's tracking status for a show between WATCHING
+// and COMPLETED based on whether an aired, unwatched episode remains (nextUp).
+func (s *Service) reconcileStatus(ctx context.Context, userID, showID uint, nextUp *models.Episode) error {
+	var show models.Show
+	if err := s.db.WithContext(ctx).First(&show, showID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return fmt.Errorf("tv: reconcile load show: %w", err)
+	}
+	var item models.TrackingItem
+	err := s.db.WithContext(ctx).
+		Where("user_id = ? AND type = ? AND external_id = ?", userID, "TV", strconv.Itoa(show.TMDBID)).
+		First(&item).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil // not tracked by this user
+	}
+	if err != nil {
+		return fmt.Errorf("tv: reconcile load item: %w", err)
+	}
+
+	var target string
+	switch {
+	case nextUp == nil && item.Status == "WATCHING":
+		target = "COMPLETED"
+	case nextUp != nil && item.Status == "COMPLETED":
+		target = "WATCHING"
+	default:
+		return nil
+	}
+	if err := s.db.WithContext(ctx).Model(&models.TrackingItem{}).
+		Where("id = ?", item.ID).Update("status", target).Error; err != nil {
+		return fmt.Errorf("tv: reconcile status: %w", err)
+	}
+	return nil
+}
+
 // MarkWatched records the episode as seen (idempotent: re-marking is a
 // no-op, never a duplicate row) and returns the show's new next-up episode
 // (nil when the show has no aired unwatched episodes left).
@@ -536,7 +588,7 @@ func (s *Service) MarkWatched(ctx context.Context, userID, episodeID uint) (*mod
 	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&watch).Error; err != nil {
 		return nil, fmt.Errorf("tv: mark watched: %w", err)
 	}
-	return s.nextUp(ctx, userID, ep.ShowID)
+	return s.nextUpAndReconcile(ctx, userID, ep.ShowID)
 }
 
 // UnmarkWatched removes the user's watch row for the episode (idempotent:
@@ -552,7 +604,7 @@ func (s *Service) UnmarkWatched(ctx context.Context, userID, episodeID uint) (*m
 		Delete(&models.EpisodeWatch{}).Error; err != nil {
 		return nil, fmt.Errorf("tv: unmark watched: %w", err)
 	}
-	return s.nextUp(ctx, userID, ep.ShowID)
+	return s.nextUpAndReconcile(ctx, userID, ep.ShowID)
 }
 
 // EpisodeState is one episode of a show plus this user's watch state, as
@@ -623,7 +675,7 @@ func (s *Service) Rewatch(ctx context.Context, userID, episodeID uint) (*models.
 	}).Create(&watch).Error; err != nil {
 		return nil, fmt.Errorf("tv: rewatch: %w", err)
 	}
-	return s.nextUp(ctx, userID, ep.ShowID)
+	return s.nextUpAndReconcile(ctx, userID, ep.ShowID)
 }
 
 // WatchThrough marks the target episode and every earlier aired episode of the
@@ -656,7 +708,7 @@ func (s *Service) WatchThrough(ctx context.Context, userID, episodeID uint) (*mo
 			return nil, fmt.Errorf("tv: watch-through insert: %w", err)
 		}
 	}
-	return s.nextUp(ctx, userID, target.ShowID)
+	return s.nextUpAndReconcile(ctx, userID, target.ShowID)
 }
 
 // WatchSeason marks every aired episode of one season of a show as watched in
@@ -681,7 +733,7 @@ func (s *Service) WatchSeason(ctx context.Context, userID, showID uint, season i
 			return nil, fmt.Errorf("tv: watch-season insert: %w", err)
 		}
 	}
-	return s.nextUp(ctx, userID, showID)
+	return s.nextUpAndReconcile(ctx, userID, showID)
 }
 
 // episode loads an episode by ID, mapping a missing row to ErrNotFound.

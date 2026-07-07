@@ -580,6 +580,17 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.3rem;
+  cursor: pointer;
+}
+.library-section-title:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: transparent;
+  color: var(--text);
 }
 
 .episode-season-head {

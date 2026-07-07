@@ -623,3 +623,31 @@ func TestWatchSeasonMarksAllAiredInSeason(t *testing.T) {
 	require.NoError(t, gdb.Model(&models.EpisodeWatch{}).Where("user_id = ?", userID).Count(&count).Error)
 	assert.EqualValues(t, 3, count)
 }
+
+// ── auto status reconciliation ──
+
+func TestStatusAutoCompletesAndReverts(t *testing.T) {
+	svc, gdb := newTestService(t, twoSeasonShow(), &fakeImages{})
+	res := addFixtureShow(t, svc) // starts WATCHING
+
+	loadItem := func() models.TrackingItem {
+		var it models.TrackingItem
+		require.NoError(t, gdb.Where("user_id = ? AND external_id = ?", userID, "100").First(&it).Error)
+		return it
+	}
+
+	// Watch all three aired episodes → caught up → COMPLETED.
+	for _, sn := range [][2]int{{1, 1}, {1, 2}, {2, 1}} {
+		ep := episodeByNumber(t, gdb, res.Show.ID, sn[0], sn[1])
+		_, err := svc.MarkWatched(context.Background(), userID, ep.ID)
+		require.NoError(t, err)
+	}
+	assert.Equal(t, "COMPLETED", loadItem().Status, "catching up auto-completes the show")
+
+	// Un-watch one aired episode → an aired unwatched episode exists again →
+	// the show reverts to WATCHING.
+	s2e1 := episodeByNumber(t, gdb, res.Show.ID, 2, 1)
+	_, err := svc.UnmarkWatched(context.Background(), userID, s2e1.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "WATCHING", loadItem().Status, "a new unwatched episode reverts to WATCHING")
+}
