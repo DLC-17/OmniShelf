@@ -388,6 +388,11 @@ button:disabled {
   color: var(--muted);
   margin-left: 0.5rem;
 }
+.badge-ok {
+  color: var(--confirm-ink);
+  background: color-mix(in srgb, var(--confirm) 26%, var(--surface));
+  border-color: color-mix(in srgb, var(--confirm) 45%, var(--border));
+}
 
 /* ---------- Toolbars / fields ---------- */
 

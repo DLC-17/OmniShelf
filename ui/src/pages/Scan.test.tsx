@@ -184,3 +184,47 @@ describe('Scan page — confirm and track', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/already track this book/i)
   })
 })
+
+describe('Scan page — bulk handheld scanner', () => {
+  const book = {
+    id: 42,
+    isbn13: '9780000000002',
+    title: 'The Pragmatic Programmer',
+    authors: 'Hunt, Thomas',
+    coverPath: 'book/9780000000002.jpg',
+    pageCount: 352,
+  }
+
+  it('auto-adds each scanned ISBN and keeps the field focused for the next', async () => {
+    setSecureContext(false) // works without a camera / secure context
+    let tracked = 0
+    server.use(
+      http.post(api('/api/books/scan'), () => HttpResponse.json(book)),
+      http.post(api('/api/books/track'), () => {
+        tracked += 1
+        return HttpResponse.json(
+          { id: 7, type: 'BOOK', externalId: book.isbn13, title: book.title, status: 'READING', progress: 0, updatedAt: '2026-07-06T00:00:00Z' },
+          { status: 201 },
+        )
+      }),
+    )
+
+    renderApp('/scan')
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('tab', { name: /handheld scanner/i }))
+    const field = await screen.findByLabelText('Scan ISBN')
+
+    // A handheld scanner types the ISBN then sends Enter.
+    await user.type(field, `${book.isbn13}{Enter}`)
+
+    // Added automatically — no per-book confirmation.
+    expect(await screen.findByText(book.title)).toBeInTheDocument()
+    expect(await screen.findByText('Added')).toBeInTheDocument()
+    expect(tracked).toBe(1)
+
+    // Field cleared and refocused, ready for the next scan.
+    await waitFor(() => expect(field).toHaveValue(''))
+    expect(field).toHaveFocus()
+  })
+})

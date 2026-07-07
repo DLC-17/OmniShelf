@@ -5,11 +5,15 @@ import type { Book } from '../api/books'
 import { isSecureContext } from '../lib/secureContext'
 import ScannerView from '../components/books/ScannerView'
 import BookConfirmCard from '../components/books/BookConfirmCard'
+import BulkScanner from '../components/books/BulkScanner'
 import ManualIsbnForm from '../components/books/ManualIsbnForm'
+
+type ScanMode = 'camera' | 'bulk'
 
 export default function Scan() {
   const secure = isSecureContext()
 
+  const [mode, setMode] = useState<ScanMode>('camera')
   const [book, setBook] = useState<Book | null>(null)
   const [looking, setLooking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -64,6 +68,31 @@ export default function Scan() {
     <section>
       <h1>Scan</h1>
 
+      <div className="tabs" role="tablist" aria-label="Scan mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'camera'}
+          className={mode === 'camera' ? 'tab active' : 'tab'}
+          onClick={() => setMode('camera')}
+        >
+          Camera
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'bulk'}
+          className={mode === 'bulk' ? 'tab active' : 'tab'}
+          onClick={() => setMode('bulk')}
+        >
+          Handheld scanner
+        </button>
+      </div>
+
+      {mode === 'bulk' && <BulkScanner />}
+
+      {mode === 'camera' && (
+        <>
       {!secure && (
         <div role="alert" className="callout">
           <strong>Camera scanning needs a secure (HTTPS) connection.</strong>
@@ -122,6 +151,8 @@ export default function Scan() {
             </div>
           )}
         </div>
+      )}
+        </>
       )}
     </section>
   )
