@@ -373,9 +373,9 @@ func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string
 		}
 
 	case kindSeen:
-		season, err1 := strconv.Atoi(fieldAt(rec, f.seasonIdx))
-		episode, err2 := strconv.Atoi(fieldAt(rec, f.episodeIdx))
-		if err1 != nil || err2 != nil || season < 0 || episode < 1 {
+		season, ok1 := firstIntField(rec, f.seasonIdxs)
+		episode, ok2 := firstIntField(rec, f.episodeIdxs)
+		if !ok1 || !ok2 || season < 0 || episode < 1 {
 			st.skipped++
 			return nil
 		}
@@ -387,6 +387,14 @@ func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string
 			// Held in memory and replayed if the user resolves the title.
 			st.pending[norm] = append(st.pending[norm], pendingWatch{season, episode, watchedAt})
 			return nil
+		}
+		// A seen-episode row is enough to put the series on the user's shelf,
+		// so a standalone seen export populates the library, not just watches.
+		if !rs.tracked {
+			if err := imp.ensureTracking(st.userID, rs.show); err != nil {
+				return err
+			}
+			rs.tracked = true
 		}
 		epID, found := rs.epIDs[epKey{season, episode}]
 		if !found {
@@ -677,6 +685,20 @@ func fieldAt(rec []string, idx int) string {
 		return ""
 	}
 	return strings.TrimSpace(rec[idx])
+}
+
+// firstIntField returns the first parseable integer among the candidate
+// columns (e.g. season_number, then s_no), so exports that fill either column
+// name resolve correctly per row.
+func firstIntField(rec []string, idxs []int) (int, bool) {
+	for _, idx := range idxs {
+		if v := fieldAt(rec, idx); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				return n, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // watchedAtFormats are the timestamp layouts seen in TV Time exports.

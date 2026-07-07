@@ -26,8 +26,8 @@ import (
 // rejected up front with a 400 before any job is created.
 var (
 	titleHeaders   = []string{"tv_show_name", "show_name", "series_name", "show", "name", "title"}
-	seasonHeaders  = []string{"episode_season_number", "season_number", "season", "season_no"}
-	episodeHeaders = []string{"episode_number", "episode", "number", "episode_no"}
+	seasonHeaders  = []string{"episode_season_number", "season_number", "season", "season_no", "s_no"}
+	episodeHeaders = []string{"episode_number", "episode", "number", "episode_no", "ep_no"}
 	watchedHeaders = []string{"watched_at", "created_at", "updated_at", "watch_date", "date", "time"}
 
 	// Goodreads library export columns (books). An ISBN column alongside a
@@ -59,12 +59,15 @@ type UploadFile struct {
 // raw here; per-row validation happens in the background job so malformed
 // data rows can be skipped and counted there.
 type parsedFile struct {
-	name       string
-	kind       fileKind
-	titleIdx   int
-	seasonIdx  int
-	episodeIdx int
-	watchedIdx int // -1 when absent
+	name string
+	kind fileKind
+	// Season/episode number columns as candidate lists (in header order), so
+	// exports that use either name — season_number/s_no, episode_number/ep_no —
+	// resolve per row to the first populated one.
+	titleIdx    int
+	seasonIdxs  []int
+	episodeIdxs []int
+	watchedIdx  int // -1 when absent
 	// Goodreads (book) column indices; -1 when absent.
 	authorIdx int
 	isbn13Idx int
@@ -180,17 +183,17 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 	}
 
 	pf := &parsedFile{
-		name: f.Name, titleIdx: -1, seasonIdx: -1, episodeIdx: -1, watchedIdx: -1,
+		name: f.Name, titleIdx: -1, watchedIdx: -1,
 		authorIdx: -1, isbn13Idx: -1, isbnIdx: -1, shelfIdx: -1, pagesIdx: -1,
 	}
 	for i, h := range header {
 		switch n := normalizeHeader(h); {
 		case pf.titleIdx < 0 && matchesHeader(n, titleHeaders):
 			pf.titleIdx = i
-		case pf.seasonIdx < 0 && matchesHeader(n, seasonHeaders):
-			pf.seasonIdx = i
-		case pf.episodeIdx < 0 && matchesHeader(n, episodeHeaders):
-			pf.episodeIdx = i
+		case matchesHeader(n, seasonHeaders):
+			pf.seasonIdxs = append(pf.seasonIdxs, i)
+		case matchesHeader(n, episodeHeaders):
+			pf.episodeIdxs = append(pf.episodeIdxs, i)
 		case pf.watchedIdx < 0 && matchesHeader(n, watchedHeaders):
 			pf.watchedIdx = i
 		case pf.authorIdx < 0 && matchesHeader(n, authorHeaders):
@@ -210,7 +213,7 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 	case pf.titleIdx >= 0 && (pf.isbn13Idx >= 0 || pf.isbnIdx >= 0):
 		// A title alongside an ISBN column is a Goodreads (book) export.
 		pf.kind = kindGoodreads
-	case pf.titleIdx >= 0 && pf.seasonIdx >= 0 && pf.episodeIdx >= 0:
+	case pf.titleIdx >= 0 && len(pf.seasonIdxs) > 0 && len(pf.episodeIdxs) > 0:
 		pf.kind = kindSeen
 	case pf.titleIdx >= 0:
 		pf.kind = kindFollowed

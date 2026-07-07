@@ -475,3 +475,29 @@ func bookItem(t *testing.T, gdb *gorm.DB, isbn13 string) models.TrackingItem {
 	require.NoError(t, gdb.Where("type = ? AND external_id = ?", "BOOK", isbn13).First(&item).Error)
 	return item
 }
+
+// TestSeenExportAddsSeriesAndWatches verifies a standalone TV Time "seen
+// episodes" export (series_name + season_number/episode_number, with the
+// s_no/ep_no columns present but empty) adds the series to the user's
+// watchlist and marks the episodes watched — no separate followed file needed.
+func TestSeenExportAddsSeriesAndWatches(t *testing.T) {
+	e := newEnv(t)
+	jobID := e.startImport(t, map[string][]byte{
+		"tvtime_seen_export.csv": fixture(t, "tvtime_seen_export.csv"),
+	})
+	jr := e.waitForJob(t, jobID)
+
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 2, jr.Total)
+	assert.Equal(t, 2, jr.Processed)
+	assert.Equal(t, 0, jr.Skipped)
+	assert.Empty(t, jr.Unresolved, "Breaking Bad resolves on TMDB")
+
+	// The series was added to the watchlist even though there was no followed file.
+	assert.EqualValues(t, 1, count[models.TrackingItem](t, e.db, "user_id = ? AND type = ? AND external_id = ?", 1, "TV", "1396"))
+	// Both episodes are marked watched, timestamped from created_at.
+	assert.EqualValues(t, 2, count[models.EpisodeWatch](t, e.db, "user_id = ?", 1))
+	var watch models.EpisodeWatch
+	require.NoError(t, e.db.Order("id").First(&watch).Error)
+	assert.Equal(t, 2008, watch.WatchedAt.Year())
+}
