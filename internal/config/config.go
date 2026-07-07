@@ -23,6 +23,12 @@ type Config struct {
 	// ContactEmail is injected into the OpenLibrary User-Agent
 	// (OMNISHELF_CONTACT_EMAIL, required for the book module).
 	ContactEmail string
+	// ScandexUserID and ScandexAccessToken authenticate ScanDex game barcode
+	// lookups (SCANDEX_USER_ID, SCANDEX_ACCESS_TOKEN). Optional: when unset the
+	// games module returns a clear "not configured" error instead of failing
+	// startup.
+	ScandexUserID      string
+	ScandexAccessToken string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -36,6 +42,9 @@ func Load() (*Config, error) {
 		JWTSecret:    os.Getenv("OMNISHELF_JWT_SECRET"),
 		TMDBAPIKey:   os.Getenv("TMDB_API_KEY"),
 		ContactEmail: os.Getenv("OMNISHELF_CONTACT_EMAIL"),
+
+		ScandexUserID:      os.Getenv("SCANDEX_USER_ID"),
+		ScandexAccessToken: os.Getenv("SCANDEX_ACCESS_TOKEN"),
 	}
 
 	if cfg.JWTSecret == "" {

@@ -228,3 +228,45 @@ describe('Scan page — bulk handheld scanner', () => {
     expect(field).toHaveFocus()
   })
 })
+
+describe('Scan page — game barcode scanning', () => {
+  const game = {
+    id: 8,
+    barcode: '045496590420',
+    title: 'The Legend of Zelda: Breath of the Wild',
+    platform: 'Nintendo Switch',
+    coverPath: '',
+    igdbId: 7346,
+  }
+
+  it('auto-adds a scanned game barcode in handheld mode', async () => {
+    setSecureContext(false)
+    let tracked = 0
+    server.use(
+      http.post(api('/api/games/scan'), () => HttpResponse.json(game)),
+      http.post(api('/api/games/track'), () => {
+        tracked += 1
+        return HttpResponse.json(
+          { id: 9, type: 'GAME', externalId: game.barcode, title: game.title, status: 'PLAYING', progress: 0, updatedAt: '2026-07-06T00:00:00Z' },
+          { status: 201 },
+        )
+      }),
+    )
+
+    renderApp('/scan')
+    const user = userEvent.setup()
+
+    // Switch from Books to Games; the handheld scanner is the default game mode.
+    await user.click(await screen.findByRole('tab', { name: /^games$/i }))
+    const field = await screen.findByLabelText('Scan game barcode')
+
+    await user.type(field, `${game.barcode}{Enter}`)
+
+    expect(await screen.findByText(game.title)).toBeInTheDocument()
+    expect(await screen.findByText('Added')).toBeInTheDocument()
+    expect(tracked).toBe(1)
+
+    await waitFor(() => expect(field).toHaveValue(''))
+    expect(field).toHaveFocus()
+  })
+})

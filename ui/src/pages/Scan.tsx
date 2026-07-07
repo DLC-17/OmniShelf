@@ -3,16 +3,20 @@ import { ApiError } from '../api/client'
 import { scanBook } from '../api/books'
 import type { Book } from '../api/books'
 import { isSecureContext } from '../lib/secureContext'
+import { bookScanTarget } from '../lib/scanTargets'
 import ScannerView from '../components/books/ScannerView'
 import BookConfirmCard from '../components/books/BookConfirmCard'
 import BulkScanner from '../components/books/BulkScanner'
 import ManualIsbnForm from '../components/books/ManualIsbnForm'
+import GameScan from '../components/games/GameScan'
 
 type ScanMode = 'camera' | 'bulk'
+type ScanMedia = 'book' | 'game'
 
 export default function Scan() {
   const secure = isSecureContext()
 
+  const [scanMedia, setScanMedia] = useState<ScanMedia>('book')
   const [mode, setMode] = useState<ScanMode>('camera')
   const [book, setBook] = useState<Book | null>(null)
   const [looking, setLooking] = useState(false)
@@ -68,6 +72,31 @@ export default function Scan() {
     <section>
       <h1>Scan</h1>
 
+      <div className="tabs" role="tablist" aria-label="Media to scan">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={scanMedia === 'book'}
+          className={scanMedia === 'book' ? 'tab active' : 'tab'}
+          onClick={() => setScanMedia('book')}
+        >
+          Books
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={scanMedia === 'game'}
+          className={scanMedia === 'game' ? 'tab active' : 'tab'}
+          onClick={() => setScanMedia('game')}
+        >
+          Games
+        </button>
+      </div>
+
+      {scanMedia === 'game' && <GameScan />}
+
+      {scanMedia === 'book' && (
+        <>
       <div className="tabs" role="tablist" aria-label="Scan mode">
         <button
           type="button"
@@ -89,7 +118,7 @@ export default function Scan() {
         </button>
       </div>
 
-      {mode === 'bulk' && <BulkScanner />}
+      {mode === 'bulk' && <BulkScanner target={bookScanTarget} />}
 
       {mode === 'camera' && (
         <>
@@ -151,6 +180,8 @@ export default function Scan() {
             </div>
           )}
         </div>
+      )}
+        </>
       )}
         </>
       )}

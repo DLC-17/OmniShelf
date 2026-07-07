@@ -30,13 +30,15 @@ import (
 const (
 	TypeTV   = "TV"
 	TypeBook = "BOOK"
+	TypeGame = "GAME"
 )
 
-// Tracking statuses. Books use READING; TV uses WATCHING. COMPLETED, PLAN_TO
-// ("not started") and STOPPED (dropped) apply to both.
+// Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING.
+// COMPLETED, PLAN_TO ("not started") and STOPPED (dropped) apply to all.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
+	StatusPlaying   = "PLAYING"
 	StatusCompleted = "COMPLETED"
 	StatusPlanTo    = "PLAN_TO"
 	StatusStopped   = "STOPPED"
@@ -232,7 +234,7 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook {
+	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
 	}
 	if status != "" && !isKnownStatus(status) {
@@ -263,6 +265,7 @@ type LibraryEntry struct {
 	Authors     string // books only
 	PageCount   int    // books only
 	Description string // books only
+	Platform    string // games only
 }
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
@@ -276,6 +279,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	// Collect the external IDs to look up per media type.
 	var tmdbIDs []int
 	var isbns []string
+	var barcodes []string
 	for _, it := range items {
 		switch it.Type {
 		case TypeTV:
@@ -284,6 +288,8 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			}
 		case TypeBook:
 			isbns = append(isbns, it.ExternalID)
+		case TypeGame:
+			barcodes = append(barcodes, it.ExternalID)
 		}
 	}
 
@@ -307,6 +313,16 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			booksByISBN[b.ISBN13] = b
 		}
 	}
+	gamesByBarcode := map[string]models.Game{}
+	if len(barcodes) > 0 {
+		var rows []models.Game
+		if err := s.db.WithContext(ctx).Where("barcode IN ?", barcodes).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading game metadata: %w", err)
+		}
+		for _, g := range rows {
+			gamesByBarcode[g.Barcode] = g
+		}
+	}
 
 	out := make([]LibraryEntry, 0, len(items))
 	for i := range items {
@@ -324,6 +340,11 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.Authors = b.Authors
 				entry.PageCount = b.PageCount
 				entry.Description = b.Description
+			}
+		case TypeGame:
+			if g, ok := gamesByBarcode[it.ExternalID]; ok {
+				entry.ArtworkPath = g.CoverPath
+				entry.Platform = g.Platform
 			}
 		}
 		out = append(out, entry)
@@ -438,7 +459,8 @@ func (s *Service) userItem(ctx context.Context, userID, itemID uint) (*models.Tr
 }
 
 // validStatus reports whether status is allowed for the media type:
-// TV → WATCHING/COMPLETED/PLAN_TO, BOOK → READING/COMPLETED/PLAN_TO.
+// TV → WATCHING, BOOK → READING, GAME → PLAYING, plus the shared
+// COMPLETED/PLAN_TO/STOPPED for all three.
 func validStatus(typ, status string) bool {
 	switch status {
 	case StatusCompleted, StatusPlanTo, StatusStopped:
@@ -447,6 +469,8 @@ func validStatus(typ, status string) bool {
 		return typ == TypeTV
 	case StatusReading:
 		return typ == TypeBook
+	case StatusPlaying:
+		return typ == TypeGame
 	default:
 		return false
 	}

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../../api/client'
-import { BOOK_STATUSES, TV_STATUSES } from '../../api/library'
+import { BOOK_STATUSES, GAME_STATUSES, TV_STATUSES } from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { useDeleteItem, useUpdateItem } from '../../hooks/useLibrary'
 import EpisodeList from '../tv/EpisodeList'
@@ -26,7 +26,9 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const [progressDraft, setProgressDraft] = useState(String(item.progress))
 
   const isBook = item.type === 'BOOK'
-  const statuses = isBook ? BOOK_STATUSES : TV_STATUSES
+  const isGame = item.type === 'GAME'
+  const isTV = item.type === 'TV'
+  const statuses = isBook ? BOOK_STATUSES : isGame ? GAME_STATUSES : TV_STATUSES
 
   const runUpdate = (patch: { status?: ItemStatus; progress?: number; rating?: number }) => {
     setError(null)
@@ -76,6 +78,7 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
             <h2>{item.title}</h2>
             {isBook && item.authors !== '' && <p className="muted" style={{ margin: 0 }}>{item.authors}</p>}
             {isBook && item.pageCount > 0 && <p className="meta">{item.pageCount} pages</p>}
+            {isGame && item.platform !== '' && <p className="muted" style={{ margin: 0 }}>{item.platform}</p>}
 
             <div className="detail-rating">
               <span className="muted">Your rating</span>
@@ -130,7 +133,7 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
           <p className="muted detail-summary">No summary available.</p>
         )}
 
-        {!isBook && item.showId > 0 && (
+        {isTV && item.showId > 0 && (
           <div className="detail-summary">
             <h3>Episodes</h3>
             <EpisodeList showId={item.showId} />

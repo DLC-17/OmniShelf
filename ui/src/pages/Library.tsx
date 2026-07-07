@@ -10,17 +10,25 @@ type MediaTab = MediaType | 'MOVIE'
 const TABS: { value: MediaTab; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
   { value: 'BOOK', label: 'Books' },
+  { value: 'GAME', label: 'Games' },
   { value: 'MOVIE', label: 'Movies' },
 ]
 
+/** The "active" status and its label for each media type. */
+const ACTIVE: Record<MediaType, { status: ItemStatus; label: string; stopped: string }> = {
+  TV: { status: 'WATCHING', label: 'Watching', stopped: 'Stopped watching' },
+  BOOK: { status: 'READING', label: 'Reading', stopped: 'Stopped reading' },
+  GAME: { status: 'PLAYING', label: 'Playing', stopped: 'Stopped playing' },
+}
+
 /** Status sections shown in order, with media-specific labels. */
 function sectionsFor(media: MediaType): { status: ItemStatus; label: string }[] {
-  const isBook = media === 'BOOK'
+  const active = ACTIVE[media]
   return [
-    { status: isBook ? 'READING' : 'WATCHING', label: isBook ? 'Reading' : 'Watching' },
+    { status: active.status, label: active.label },
     { status: 'PLAN_TO', label: 'Not started' },
     { status: 'COMPLETED', label: 'Completed' },
-    { status: 'STOPPED', label: isBook ? 'Stopped reading' : 'Stopped watching' },
+    { status: 'STOPPED', label: active.stopped },
   ]
 }
 

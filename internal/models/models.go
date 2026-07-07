@@ -24,9 +24,9 @@ type TrackingItem struct {
 	ID         uint   `gorm:"primaryKey"`
 	UserID     uint   `gorm:"not null;index:idx_user_media,unique"`
 	Type       string `gorm:"type:varchar(10);not null;index:idx_user_media,unique"` // "TV" | "BOOK"
-	ExternalID string `gorm:"not null;index:idx_user_media,unique"`                  // TMDB ID | ISBN-13
+	ExternalID string `gorm:"not null;index:idx_user_media,unique"`                  // TMDB ID | ISBN-13 | barcode
 	Title      string `gorm:"not null"`
-	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, COMPLETED, PLAN_TO
+	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, PLAYING, COMPLETED, PLAN_TO, STOPPED
 	Progress   int    `gorm:"default:0"`          // page number (books); unused for TV
 	Rating     int    `gorm:"default:0"`          // user's 1–5 self-rating; 0 = unrated
 	UpdatedAt  time.Time
@@ -69,6 +69,18 @@ type Book struct {
 	CoverPath   string
 	PageCount   int
 	Description string // OpenLibrary work summary; may be empty
+}
+
+// Game is the shared ScanDex/IGDB metadata cache (one row per barcode, all
+// users). ScanDex supplies title, platform and the IGDB id; cover art is not
+// part of its payload, so CoverPath is usually empty.
+type Game struct {
+	ID        uint   `gorm:"primaryKey"`
+	Barcode   string `gorm:"unique;not null"` // scanned UPC/EAN
+	Title     string `gorm:"not null"`
+	Platform  string
+	CoverPath string
+	IGDBID    int
 }
 
 // ShowAlias remembers that an imported (normalized) series title resolved to a
@@ -121,6 +133,7 @@ func All() []any {
 		&Episode{},
 		&EpisodeWatch{},
 		&Book{},
+		&Game{},
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},

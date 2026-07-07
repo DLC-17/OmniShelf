@@ -1,12 +1,13 @@
 import { request } from './client'
 
-export type MediaType = 'TV' | 'BOOK'
+export type MediaType = 'TV' | 'BOOK' | 'GAME'
 
-/** All statuses across both media types; per-type validity is enforced server-side. */
-export type ItemStatus = 'WATCHING' | 'READING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
+/** All statuses across every media type; per-type validity is enforced server-side. */
+export type ItemStatus = 'WATCHING' | 'READING' | 'PLAYING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
 
 export const TV_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
+export const GAME_STATUSES: ItemStatus[] = ['PLAYING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 
 export interface LibraryItem {
   id: number
@@ -26,6 +27,8 @@ export interface LibraryItem {
   authors: string
   pageCount: number
   description: string
+  /** Games only. */
+  platform: string
   updatedAt: string
 }
 
