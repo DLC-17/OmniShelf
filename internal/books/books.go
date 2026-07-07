@@ -57,7 +57,9 @@ var (
 	// ErrInvalidProgress means progress is negative or set on a TV item
 	// (TV progress is derived from EpisodeWatch counts, never stored).
 	ErrInvalidProgress = errors.New("books: invalid progress")
-	// ErrEmptyUpdate means a PATCH carried neither status nor progress.
+	// ErrInvalidRating means a rating outside the 0–5 range.
+	ErrInvalidRating = errors.New("books: invalid rating")
+	// ErrEmptyUpdate means a PATCH carried no updatable fields.
 	ErrEmptyUpdate = errors.New("books: no fields to update")
 	// ErrInvalidFilter means an unknown type/status library filter value.
 	ErrInvalidFilter = errors.New("books: invalid filter")
@@ -144,11 +146,12 @@ func (s *Service) Scan(ctx context.Context, isbn string) (*models.Book, error) {
 	}
 
 	book := models.Book{
-		ISBN13:    isbn13,
-		Title:     meta.Title,
-		Authors:   strings.Join(meta.Authors, ", "),
-		CoverPath: coverPath,
-		PageCount: meta.PageCount,
+		ISBN13:      isbn13,
+		Title:       meta.Title,
+		Authors:     strings.Join(meta.Authors, ", "),
+		CoverPath:   coverPath,
+		PageCount:   meta.PageCount,
+		Description: meta.Description,
 	}
 	if err := s.upsertBook(ctx, &book); err != nil {
 		return nil, err
@@ -249,12 +252,87 @@ func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string
 	return items, nil
 }
 
+// LibraryEntry is a tracking item enriched with the artwork and (for books)
+// the metadata needed by the library grid and its expandable detail view.
+type LibraryEntry struct {
+	Item        models.TrackingItem
+	ArtworkPath string // relative /images path; "" = placeholder
+	Authors     string // books only
+	PageCount   int    // books only
+	Description string // books only
+}
+
+// ListLibrary is ListItems plus the cached artwork and book metadata, joined
+// in from the shared Show/Book caches with two batch queries.
+func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status string) ([]LibraryEntry, error) {
+	items, err := s.ListItems(ctx, userID, typ, status)
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect the external IDs to look up per media type.
+	var tmdbIDs []int
+	var isbns []string
+	for _, it := range items {
+		switch it.Type {
+		case TypeTV:
+			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
+				tmdbIDs = append(tmdbIDs, id)
+			}
+		case TypeBook:
+			isbns = append(isbns, it.ExternalID)
+		}
+	}
+
+	shows := map[string]models.Show{}
+	if len(tmdbIDs) > 0 {
+		var rows []models.Show
+		if err := s.db.WithContext(ctx).Where("tmdb_id IN ?", tmdbIDs).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading show artwork: %w", err)
+		}
+		for _, sh := range rows {
+			shows[strconv.Itoa(sh.TMDBID)] = sh
+		}
+	}
+	booksByISBN := map[string]models.Book{}
+	if len(isbns) > 0 {
+		var rows []models.Book
+		if err := s.db.WithContext(ctx).Where("isbn13 IN ?", isbns).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading book metadata: %w", err)
+		}
+		for _, b := range rows {
+			booksByISBN[b.ISBN13] = b
+		}
+	}
+
+	out := make([]LibraryEntry, 0, len(items))
+	for i := range items {
+		it := items[i]
+		entry := LibraryEntry{Item: it}
+		switch it.Type {
+		case TypeTV:
+			if sh, ok := shows[it.ExternalID]; ok {
+				entry.ArtworkPath = sh.PosterPath
+			}
+		case TypeBook:
+			if b, ok := booksByISBN[it.ExternalID]; ok {
+				entry.ArtworkPath = b.CoverPath
+				entry.Authors = b.Authors
+				entry.PageCount = b.PageCount
+				entry.Description = b.Description
+			}
+		}
+		out = append(out, entry)
+	}
+	return out, nil
+}
+
 // UpdateItem patches status and/or progress on the user's tracking item.
 // Status must be valid for the item's media type; progress is a
 // page number and only meaningful for books (TV progress is derived from
 // EpisodeWatch rows, never stored).
-func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress *int) (*models.TrackingItem, error) {
-	if status == nil && progress == nil {
+func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress, rating *int) (*models.TrackingItem, error) {
+	if status == nil && progress == nil && rating == nil {
 		return nil, ErrEmptyUpdate
 	}
 
@@ -277,6 +355,12 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 			return nil, fmt.Errorf("%w: page number must not be negative", ErrInvalidProgress)
 		}
 		item.Progress = *progress
+	}
+	if rating != nil {
+		if *rating < 0 || *rating > 5 {
+			return nil, fmt.Errorf("%w: rating must be between 0 and 5", ErrInvalidRating)
+		}
+		item.Rating = *rating
 	}
 
 	if err := s.db.WithContext(ctx).Save(item).Error; err != nil {

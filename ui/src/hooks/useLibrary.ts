@@ -5,11 +5,12 @@ import { UP_NEXT_KEY } from './useUpNext'
 
 export const LIBRARY_KEY = ['library'] as const
 
-export function useLibrary(filters: LibraryFilters) {
+export function useLibrary(filters: LibraryFilters, enabled = true) {
   return useQuery({
     // Filters are part of the key so each type/status combination caches independently.
     queryKey: [...LIBRARY_KEY, filters.type ?? '', filters.status ?? ''] as const,
     queryFn: () => fetchLibrary(filters),
+    enabled,
   })
 }
 

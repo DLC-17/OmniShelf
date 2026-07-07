@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HttpResponse, http } from 'msw'
 import { api, server } from '../test/server'
@@ -18,6 +18,11 @@ const tvItem = {
   title: 'Game of Thrones',
   status: 'WATCHING',
   progress: 0,
+  rating: 0,
+  artworkPath: 'tv/1399.jpg',
+  authors: '',
+  pageCount: 0,
+  description: '',
   updatedAt: '2026-07-01T00:00:00Z',
 }
 const bookItem = {
@@ -27,6 +32,11 @@ const bookItem = {
   title: 'A Game of Thrones',
   status: 'READING',
   progress: 100,
+  rating: 0,
+  artworkPath: 'book/9780553103540.jpg',
+  authors: 'George R. R. Martin',
+  pageCount: 694,
+  description: 'A tale of ice and fire.',
   updatedAt: '2026-07-01T00:00:00Z',
 }
 
@@ -57,6 +67,8 @@ describe('Library page', () => {
     renderApp('/library')
     const user = userEvent.setup()
 
+    // Open the item's detail, where the controls live.
+    await user.click(await screen.findByRole('button', { name: /open game of thrones/i }))
     const select = await screen.findByLabelText(/status for game of thrones/i)
     await user.selectOptions(select, 'COMPLETED')
 
@@ -78,6 +90,7 @@ describe('Library page', () => {
     renderApp('/library')
     const user = userEvent.setup()
 
+    await user.click(await screen.findByRole('button', { name: /open a game of thrones/i }))
     const page = await screen.findByLabelText(/page for a game of thrones/i)
     await user.clear(page)
     await user.type(page, '150')
@@ -103,11 +116,11 @@ describe('Library page', () => {
     renderApp('/library')
     const user = userEvent.setup()
 
-    const row = (await screen.findByText('Game of Thrones')).closest('li')!
-    await user.click(within(row).getByRole('button', { name: /delete game of thrones/i }))
+    await user.click(await screen.findByRole('button', { name: /open game of thrones/i }))
+    await user.click(await screen.findByRole('button', { name: /delete game of thrones/i }))
     // Confirm step appears; nothing deleted yet.
     expect(deleted).toBe(false)
-    await user.click(within(row).getByRole('button', { name: /^confirm$/i }))
+    await user.click(await screen.findByRole('button', { name: /^confirm$/i }))
 
     expect(await screen.findByText(/no items match these filters/i)).toBeInTheDocument()
   })

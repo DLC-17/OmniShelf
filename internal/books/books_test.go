@@ -273,34 +273,41 @@ func TestUpdateItem(t *testing.T) {
 	intPtr := func(i int) *int { return &i }
 
 	// Book: status + page progress.
-	updated, err := svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusCompleted), intPtr(320))
+	updated, err := svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusCompleted), intPtr(320), nil)
 	require.NoError(t, err)
 	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 320, updated.Progress)
 
 	// TV: valid status change.
-	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusPlanTo), nil)
+	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusPlanTo), nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPlanTo, updated.Status)
 
+	// Rating: a 1–5 self-rating on either media type.
+	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, nil, intPtr(4))
+	require.NoError(t, err)
+	assert.Equal(t, 4, updated.Rating)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, intPtr(6))
+	assert.ErrorIs(t, err, ErrInvalidRating, "rating is capped at 5")
+
 	// Invalid status per type.
-	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusReading), nil)
+	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusReading), nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidStatus, "READING is not a TV status")
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusWatching), nil)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusWatching), nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidStatus, "WATCHING is not a book status")
 
 	// Progress rules.
-	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, intPtr(5))
+	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, intPtr(5), nil)
 	assert.ErrorIs(t, err, ErrInvalidProgress, "TV progress is derived, not stored")
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, intPtr(-1))
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, intPtr(-1), nil)
 	assert.ErrorIs(t, err, ErrInvalidProgress)
 
 	// Empty patch.
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, nil)
 	assert.ErrorIs(t, err, ErrEmptyUpdate)
 
 	// Cross-user: user 2 must see user 1's item as missing (no leak).
-	_, err = svc.UpdateItem(ctx, 2, bookItem.ID, strPtr(StatusPlanTo), nil)
+	_, err = svc.UpdateItem(ctx, 2, bookItem.ID, strPtr(StatusPlanTo), nil, nil)
 	assert.ErrorIs(t, err, ErrItemNotFound)
 }
 

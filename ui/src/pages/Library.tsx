@@ -1,61 +1,61 @@
 import { useState } from 'react'
 import { ApiError } from '../api/client'
-import type { ItemStatus, MediaType } from '../api/library'
-import LibraryRow from '../components/tv/LibraryRow'
+import type { LibraryItem, MediaType } from '../api/library'
+import LibraryDetail from '../components/library/LibraryDetail'
+import Poster from '../components/tv/Poster'
 import { useLibrary } from '../hooks/useLibrary'
 
-const TYPE_OPTIONS: MediaType[] = ['TV', 'BOOK']
-const STATUS_OPTIONS: ItemStatus[] = ['WATCHING', 'READING', 'PLAN_TO', 'COMPLETED']
+type MediaTab = MediaType | 'MOVIE'
+
+const TABS: { value: MediaTab; label: string }[] = [
+  { value: 'TV', label: 'TV Shows' },
+  { value: 'BOOK', label: 'Books' },
+  { value: 'MOVIE', label: 'Movies' },
+]
 
 /**
- * Library shelf: the user's tracked items with type/status filters
- * and inline status/progress editing plus confirm-gated delete per row.
+ * Library shelf: a cover-art grid toggled between TV shows, books, and movies
+ * (coming soon). Clicking a cover opens the item's detail — summary, author,
+ * length, a self-rating, inline status/progress editing, and delete.
  */
 export default function Library() {
-  const [type, setType] = useState<MediaType | ''>('')
-  const [status, setStatus] = useState<ItemStatus | ''>('')
+  const [media, setMedia] = useState<MediaTab>('TV')
+  const [selectedId, setSelectedId] = useState<number | null>(null)
 
-  const library = useLibrary({ type, status })
+  const isMovie = media === 'MOVIE'
+  const library = useLibrary({ type: isMovie ? '' : media }, !isMovie)
+
+  const items: LibraryItem[] = library.data ?? []
+  const selected = items.find((i) => i.id === selectedId) ?? null
 
   return (
     <section>
       <h1>Library</h1>
 
-      <div className="toolbar">
-        <label className="field">
-          <span>Type</span>
-          <select
-            aria-label="Filter by type"
-            value={type}
-            onChange={(e) => setType(e.target.value as MediaType | '')}
+      <div className="tabs" role="tablist" aria-label="Media type">
+        {TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            role="tab"
+            aria-selected={media === tab.value}
+            className={media === tab.value ? 'tab active' : 'tab'}
+            onClick={() => {
+              setMedia(tab.value)
+              setSelectedId(null)
+            }}
           >
-            <option value="">All</option>
-            {TYPE_OPTIONS.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Status</span>
-          <select
-            aria-label="Filter by status"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as ItemStatus | '')}
-          >
-            <option value="">All</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {library.isPending && <p className="muted">Loading your library…</p>}
-      {library.isError && (
+      {isMovie && (
+        <p className="empty">Movies are coming soon — you’ll be able to track films here.</p>
+      )}
+
+      {!isMovie && library.isPending && <p className="muted">Loading your library…</p>}
+      {!isMovie && library.isError && (
         <p role="alert" className="alert">
           {library.error instanceof ApiError
             ? library.error.message
@@ -63,19 +63,33 @@ export default function Library() {
         </p>
       )}
 
-      {library.data !== undefined && library.data.length === 0 && (
+      {!isMovie && library.data !== undefined && items.length === 0 && (
         <p className="empty">
           No items match these filters. Add a show from Up Next or scan a book to start building your
           shelf.
         </p>
       )}
 
-      {library.data !== undefined && library.data.length > 0 && (
-        <ul className="list">
-          {library.data.map((item) => (
-            <LibraryRow key={item.id} item={item} />
+      {!isMovie && items.length > 0 && (
+        <ul className="cover-grid">
+          {items.map((item) => (
+            <li key={item.id}>
+              <button
+                type="button"
+                className="cover-tile"
+                aria-label={`Open ${item.title}`}
+                onClick={() => setSelectedId(item.id)}
+              >
+                <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
+                <span className="cover-title">{item.title}</span>
+              </button>
+            </li>
           ))}
         </ul>
+      )}
+
+      {selected !== null && (
+        <LibraryDetail item={selected} onClose={() => setSelectedId(null)} />
       )}
     </section>
   )

@@ -16,6 +16,14 @@ export interface LibraryItem {
   status: ItemStatus
   /** Page number; books only (TV progress is derived server-side). */
   progress: number
+  /** User's 1–5 self-rating; 0 = unrated. */
+  rating: number
+  /** Relative /images path for the poster/cover; '' = show a placeholder. */
+  artworkPath: string
+  /** Books only. */
+  authors: string
+  pageCount: number
+  description: string
   updatedAt: string
 }
 
@@ -35,6 +43,7 @@ export function fetchLibrary(filters: LibraryFilters = {}): Promise<LibraryItem[
 export interface UpdateItemPatch {
   status?: ItemStatus
   progress?: number
+  rating?: number
 }
 
 export function updateItem(id: number, patch: UpdateItemPatch): Promise<LibraryItem> {

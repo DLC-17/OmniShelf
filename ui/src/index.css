@@ -565,6 +565,124 @@ button:disabled {
   font-size: 0.85rem;
 }
 
+/* ---------- Library cover grid ---------- */
+
+.cover-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1.1rem;
+}
+.cover-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+}
+.cover-tile:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: var(--border);
+}
+.cover-tile .poster {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+}
+.cover-title {
+  font-weight: 550;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  color: var(--text);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ---------- Rating stars ---------- */
+
+.rating {
+  display: inline-flex;
+  gap: 0.1rem;
+}
+.star {
+  padding: 0.1rem 0.15rem;
+  font-size: 1.35rem;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--border);
+}
+.star.on {
+  color: var(--confirm);
+}
+.star:hover:not(:disabled) {
+  background: var(--surface-alt);
+  border-color: transparent;
+  color: var(--confirm);
+}
+
+/* ---------- Modal / detail ---------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(70, 37, 33, 0.45);
+  display: grid;
+  place-items: start center;
+  padding: 5vh 1rem;
+  overflow-y: auto;
+  z-index: 50;
+}
+.modal {
+  position: relative;
+  width: 100%;
+  max-width: 34rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+}
+.modal-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  font-size: 1rem;
+  padding: 0.3rem 0.6rem;
+}
+.detail {
+  display: flex;
+  gap: 1.1rem;
+  align-items: flex-start;
+}
+.detail-rating {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+.detail-summary {
+  margin-top: 1.1rem;
+  border-top: 1px solid var(--border);
+  padding-top: 0.9rem;
+}
+.detail-summary h3 {
+  margin: 0 0 0.35rem;
+}
+.detail-actions {
+  margin-top: 1.25rem;
+}
+
 /* ---------- Poster ---------- */
 
 .poster {

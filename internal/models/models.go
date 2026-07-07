@@ -28,6 +28,7 @@ type TrackingItem struct {
 	Title      string `gorm:"not null"`
 	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, COMPLETED, PLAN_TO
 	Progress   int    `gorm:"default:0"`          // page number (books); unused for TV
+	Rating     int    `gorm:"default:0"`          // user's 1–5 self-rating; 0 = unrated
 	UpdatedAt  time.Time
 }
 
@@ -61,12 +62,13 @@ type EpisodeWatch struct {
 
 // Book is the shared OpenLibrary metadata cache.
 type Book struct {
-	ID        uint   `gorm:"primaryKey"`
-	ISBN13    string `gorm:"unique;not null"`
-	Title     string `gorm:"not null"`
-	Authors   string // comma-joined
-	CoverPath string
-	PageCount int
+	ID          uint   `gorm:"primaryKey"`
+	ISBN13      string `gorm:"unique;not null"`
+	Title       string `gorm:"not null"`
+	Authors     string // comma-joined
+	CoverPath   string
+	PageCount   int
+	Description string // OpenLibrary work summary; may be empty
 }
 
 // ImportJob tracks a TV Time CSV import.
