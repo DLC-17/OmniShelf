@@ -237,6 +237,7 @@ describe('Scan page — game barcode scanning', () => {
     platform: 'Nintendo Switch',
     coverPath: '',
     igdbId: 7346,
+    description: 'An open-world adventure.',
   }
 
   it('auto-adds a scanned game barcode in handheld mode', async () => {

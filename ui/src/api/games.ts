@@ -9,6 +9,7 @@ export interface Game {
   platform: string
   coverPath: string
   igdbId: number
+  description: string
 }
 
 /** Tracking statuses a game may take. */

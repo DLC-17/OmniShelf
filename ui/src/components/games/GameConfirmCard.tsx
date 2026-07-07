@@ -69,6 +69,12 @@ export default function GameConfirmCard({ game, onDone }: GameConfirmCardProps) 
         </div>
       </div>
 
+      {game.description !== '' && (
+        <p className="muted" style={{ marginTop: '0.75rem' }}>
+          {game.description}
+        </p>
+      )}
+
       {tracked ? (
         <div className="stack" style={{ marginTop: '1rem' }}>
           <p role="status" className="notice">

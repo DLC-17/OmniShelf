@@ -345,6 +345,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			if g, ok := gamesByBarcode[it.ExternalID]; ok {
 				entry.ArtworkPath = g.CoverPath
 				entry.Platform = g.Platform
+				entry.Description = g.Description
 			}
 		}
 		out = append(out, entry)

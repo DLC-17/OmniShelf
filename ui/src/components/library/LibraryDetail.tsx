@@ -123,13 +123,13 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
           </div>
         </div>
 
-        {isBook && item.description !== '' && (
+        {(isBook || isGame) && item.description !== '' && (
           <div className="detail-summary">
             <h3>Summary</h3>
             <p>{item.description}</p>
           </div>
         )}
-        {isBook && item.description === '' && (
+        {(isBook || isGame) && item.description === '' && (
           <p className="muted detail-summary">No summary available.</p>
         )}
 

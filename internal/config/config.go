@@ -29,6 +29,12 @@ type Config struct {
 	// startup.
 	ScandexUserID      string
 	ScandexAccessToken string
+	// IGDBClientID and IGDBClientSecret authenticate IGDB game-detail lookups
+	// via Twitch OAuth (IGDB_CLIENT_ID, IGDB_CLIENT_SECRET). Optional: when
+	// unset games keep their ScanDex title/platform but gain no cover or
+	// summary.
+	IGDBClientID     string
+	IGDBClientSecret string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -45,6 +51,9 @@ func Load() (*Config, error) {
 
 		ScandexUserID:      os.Getenv("SCANDEX_USER_ID"),
 		ScandexAccessToken: os.Getenv("SCANDEX_ACCESS_TOKEN"),
+
+		IGDBClientID:     os.Getenv("IGDB_CLIENT_ID"),
+		IGDBClientSecret: os.Getenv("IGDB_CLIENT_SECRET"),
 	}
 
 	if cfg.JWTSecret == "" {

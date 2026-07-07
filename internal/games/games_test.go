@@ -3,6 +3,7 @@ package games
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/davidlc1229/omnishelf/internal/db"
+	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 )
@@ -54,10 +56,50 @@ func fullGame() *scandex.Game {
 	}
 }
 
+// fakeEnricher is a canned IGDB Enricher.
+type fakeEnricher struct {
+	games map[int]*igdb.Game
+	err   error
+}
+
+func (f *fakeEnricher) GetGame(_ context.Context, id int) (*igdb.Game, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.games[id], nil // nil map miss → (nil, nil), a valid "no metadata"
+}
+
+func (f *fakeEnricher) CoverURL(imageID, _ string) string {
+	if imageID == "" {
+		return ""
+	}
+	return "http://img.test/" + imageID + ".jpg"
+}
+
+// fakeImages is a canned ImageStore.
+type fakeImages struct {
+	err     error
+	fetched []string
+}
+
+func (f *fakeImages) Fetch(_ context.Context, _ *http.Client, _, kind, externalID string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	f.fetched = append(f.fetched, externalID)
+	return kind + "/" + externalID + ".jpg", nil
+}
+
 func newTestService(t *testing.T, meta *fakeMetadata) (*Service, *gorm.DB) {
 	t.Helper()
 	gdb := testDB(t)
-	return NewService(gdb, meta), gdb
+	return NewService(gdb, meta, nil, nil), gdb
+}
+
+func newEnrichedService(t *testing.T, meta *fakeMetadata, enr *fakeEnricher, imgs *fakeImages) (*Service, *gorm.DB) {
+	t.Helper()
+	gdb := testDB(t)
+	return NewService(gdb, meta, enr, imgs), gdb
 }
 
 func TestScanHappyPath(t *testing.T) {
@@ -86,6 +128,35 @@ func TestScanDBFirst(t *testing.T) {
 	_, err = svc.Scan(context.Background(), testBarcode)
 	require.NoError(t, err)
 	assert.Equal(t, 1, meta.calls, "second scan should be served from cache")
+}
+
+// IGDB enrichment adds a summary and downloads the cover.
+func TestScanEnrichesFromIGDB(t *testing.T) {
+	meta := &fakeMetadata{games: map[string]*scandex.Game{testBarcode: fullGame()}}
+	enr := &fakeEnricher{games: map[int]*igdb.Game{
+		7346: {ID: 7346, Name: "Zelda", Summary: "An open-world adventure.", CoverImageID: "co3p2d"},
+	}}
+	imgs := &fakeImages{}
+	svc, _ := newEnrichedService(t, meta, enr, imgs)
+
+	game, err := svc.Scan(context.Background(), testBarcode)
+	require.NoError(t, err)
+	assert.Equal(t, "An open-world adventure.", game.Description)
+	assert.Equal(t, "game/"+testBarcode+".jpg", game.CoverPath)
+	assert.Equal(t, []string{testBarcode}, imgs.fetched)
+}
+
+// A failing IGDB lookup must not fail the scan — the game is still saved.
+func TestScanEnrichmentBestEffort(t *testing.T) {
+	meta := &fakeMetadata{games: map[string]*scandex.Game{testBarcode: fullGame()}}
+	enr := &fakeEnricher{err: errors.New("igdb down")}
+	svc, _ := newEnrichedService(t, meta, enr, &fakeImages{})
+
+	game, err := svc.Scan(context.Background(), testBarcode)
+	require.NoError(t, err)
+	assert.Equal(t, "The Legend of Zelda: Breath of the Wild", game.Title)
+	assert.Equal(t, "", game.Description)
+	assert.Equal(t, "", game.CoverPath)
 }
 
 func TestScanNotFound(t *testing.T) {

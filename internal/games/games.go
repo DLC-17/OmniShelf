@@ -12,10 +12,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 )
@@ -56,15 +60,39 @@ type MetadataClient interface {
 	Lookup(ctx context.Context, barcode string) (*scandex.Game, error)
 }
 
-// Service implements game scanning and tracking.
-type Service struct {
-	db       *gorm.DB
-	metadata MetadataClient
+// Enricher is the slice of *igdb.Client the service needs to add a cover and
+// summary. Optional: when nil (or unconfigured) games keep their ScanDex
+// title/platform with no cover or summary.
+type Enricher interface {
+	GetGame(ctx context.Context, igdbID int) (*igdb.Game, error)
+	CoverURL(imageID, size string) string
 }
 
-// NewService wires the service.
-func NewService(gdb *gorm.DB, metadata MetadataClient) *Service {
-	return &Service{db: gdb, metadata: metadata}
+// ImageStore is the slice of *images.Store the service needs; tests substitute
+// a fake. Optional: when nil no cover is downloaded.
+type ImageStore interface {
+	Fetch(ctx context.Context, httpClient *http.Client, url, kind, externalID string) (string, error)
+}
+
+// Service implements game scanning and tracking.
+type Service struct {
+	db         *gorm.DB
+	metadata   MetadataClient
+	enrich     Enricher
+	images     ImageStore
+	httpClient *http.Client
+}
+
+// NewService wires the service. enrich and images may be nil to disable IGDB
+// cover/summary enrichment.
+func NewService(gdb *gorm.DB, metadata MetadataClient, enrich Enricher, images ImageStore) *Service {
+	return &Service{
+		db:         gdb,
+		metadata:   metadata,
+		enrich:     enrich,
+		images:     images,
+		httpClient: &http.Client{Timeout: 15 * time.Second},
+	}
 }
 
 // Scan resolves a barcode to a game and upserts the shared Game cache row.
@@ -104,10 +132,51 @@ func (s *Service) Scan(ctx context.Context, barcode string) (*models.Game, error
 		Platform: meta.Platform,
 		IGDBID:   meta.IGDBID,
 	}
+	s.enrichFromIGDB(ctx, &game)
 	if err := s.upsertGame(ctx, &game); err != nil {
 		return nil, err
 	}
 	return &game, nil
+}
+
+// enrichFromIGDB augments a freshly-scanned game with its IGDB summary and
+// cover. It is best-effort: a missing IGDB id, unconfigured/erroring IGDB, or a
+// failed cover download is logged and leaves the affected field empty (the game
+// is still saved with its ScanDex title/platform). The nightly artwork retry
+// is not wired for games yet, so a transient cover failure simply means no
+// cover until the barcode is re-scanned.
+func (s *Service) enrichFromIGDB(ctx context.Context, game *models.Game) {
+	if s.enrich == nil || game.IGDBID == 0 {
+		return
+	}
+
+	detail, err := s.enrich.GetGame(ctx, game.IGDBID)
+	if err != nil {
+		if !errors.Is(err, igdb.ErrUnconfigured) {
+			log.Printf("games: IGDB lookup for %d failed: %v", game.IGDBID, err)
+		}
+		return
+	}
+	if detail == nil {
+		return
+	}
+
+	game.Description = detail.Summary
+	if game.Title == "" {
+		game.Title = detail.Name
+	}
+
+	if s.images == nil {
+		return
+	}
+	if url := s.enrich.CoverURL(detail.CoverImageID, ""); url != "" {
+		path, err := s.images.Fetch(ctx, s.httpClient, url, "game", game.Barcode)
+		if err != nil {
+			log.Printf("games: cover download for %s failed: %v", game.Barcode, err)
+			return
+		}
+		game.CoverPath = path
+	}
 }
 
 // upsertGame creates the Game row or refreshes an existing one for the barcode.

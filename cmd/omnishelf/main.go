@@ -17,6 +17,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/config"
 	"github.com/davidlc1229/omnishelf/internal/db"
 	"github.com/davidlc1229/omnishelf/internal/games"
+	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/images"
 	"github.com/davidlc1229/omnishelf/internal/importer"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
@@ -74,6 +75,7 @@ func runServer() error {
 	tmdbClient := tmdb.New(cfg.TMDBAPIKey)
 	olClient := openlibrary.New(cfg.ContactEmail)
 	scandexClient := scandex.New(cfg.ScandexUserID, cfg.ScandexAccessToken)
+	igdbClient := igdb.New(cfg.IGDBClientID, cfg.IGDBClientSecret)
 	imageStore := images.New(cfg.ImagesDir)
 
 	// Unauthenticated liveness probe (Docker HEALTHCHECK / TrueNAS): reachable
@@ -91,7 +93,7 @@ func runServer() error {
 	api.RegisterBookRoutes(protected, bookSvc)
 	api.RegisterLibraryRoutes(protected, bookSvc)
 
-	gameSvc := games.NewService(gdb, scandexClient)
+	gameSvc := games.NewService(gdb, scandexClient, igdbClient, imageStore)
 	api.RegisterGameRoutes(protected, gameSvc)
 
 	imp := importer.New(importer.Config{DB: gdb, TMDB: tmdbClient, Images: imageStore})

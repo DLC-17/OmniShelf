@@ -39,22 +39,24 @@ type gameTrackRequest struct {
 
 // gameResponse is the JSON shape of a Game payload.
 type gameResponse struct {
-	ID        uint   `json:"id"`
-	Barcode   string `json:"barcode"`
-	Title     string `json:"title"`
-	Platform  string `json:"platform"`
-	CoverPath string `json:"coverPath"`
-	IGDBID    int    `json:"igdbId"`
+	ID          uint   `json:"id"`
+	Barcode     string `json:"barcode"`
+	Title       string `json:"title"`
+	Platform    string `json:"platform"`
+	CoverPath   string `json:"coverPath"`
+	IGDBID      int    `json:"igdbId"`
+	Description string `json:"description"`
 }
 
 func toGameResponse(g *models.Game) gameResponse {
 	return gameResponse{
-		ID:        g.ID,
-		Barcode:   g.Barcode,
-		Title:     g.Title,
-		Platform:  g.Platform,
-		CoverPath: g.CoverPath,
-		IGDBID:    g.IGDBID,
+		ID:          g.ID,
+		Barcode:     g.Barcode,
+		Title:       g.Title,
+		Platform:    g.Platform,
+		CoverPath:   g.CoverPath,
+		IGDBID:      g.IGDBID,
+		Description: g.Description,
 	}
 }
 

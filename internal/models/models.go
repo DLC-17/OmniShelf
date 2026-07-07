@@ -75,12 +75,13 @@ type Book struct {
 // users). ScanDex supplies title, platform and the IGDB id; cover art is not
 // part of its payload, so CoverPath is usually empty.
 type Game struct {
-	ID        uint   `gorm:"primaryKey"`
-	Barcode   string `gorm:"unique;not null"` // scanned UPC/EAN
-	Title     string `gorm:"not null"`
-	Platform  string
-	CoverPath string
-	IGDBID    int
+	ID          uint   `gorm:"primaryKey"`
+	Barcode     string `gorm:"unique;not null"` // scanned UPC/EAN
+	Title       string `gorm:"not null"`
+	Platform    string
+	CoverPath   string
+	IGDBID      int
+	Description string // IGDB summary; may be empty
 }
 
 // ShowAlias remembers that an imported (normalized) series title resolved to a
