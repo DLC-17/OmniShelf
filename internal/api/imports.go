@@ -47,17 +47,19 @@ type jobDTO struct {
 	Processed  int      `json:"processed"`
 	Total      int      `json:"total"`
 	Skipped    int      `json:"skipped"`
+	Current    string   `json:"current,omitempty"` // title being imported right now
 	Unresolved []string `json:"unresolved"`
 	Error      string   `json:"error,omitempty"`
 }
 
-func toJobDTO(job *models.ImportJob, skipped int, unresolved []string) jobDTO {
+func toJobDTO(job *models.ImportJob, skipped int, current string, unresolved []string) jobDTO {
 	return jobDTO{
 		JobID:      job.ID,
 		Status:     job.Status,
 		Processed:  job.Processed,
 		Total:      job.Total,
 		Skipped:    skipped,
+		Current:    current,
 		Unresolved: unresolved,
 		Error:      job.Error,
 	}
@@ -135,7 +137,7 @@ func (h *importHandler) status(c *gin.Context) {
 		writeImportError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toJobDTO(job, skipped, unresolved))
+	c.JSON(http.StatusOK, toJobDTO(job, skipped, h.imp.CurrentItem(jobID), unresolved))
 }
 
 // resolveRequest maps unresolved titles to TMDB show IDs.
@@ -172,7 +174,7 @@ func (h *importHandler) resolve(c *gin.Context) {
 		writeImportError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, toJobDTO(job, skipped, unresolved))
+	c.JSON(http.StatusOK, toJobDTO(job, skipped, "", unresolved))
 }
 
 func parseJobID(c *gin.Context) (uint, bool) {

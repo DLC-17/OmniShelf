@@ -93,6 +93,7 @@ type Importer struct {
 
 	mu      sync.Mutex
 	skipped map[uint]int
+	current map[uint]string                    // jobID → title currently being imported
 	pending map[uint]map[string][]pendingWatch // jobID → normalized title → rows
 }
 
@@ -114,6 +115,7 @@ func New(cfg Config) *Importer {
 		lockRetry:    cfg.LockRetry,
 		lockWait:     cfg.LockWait,
 		skipped:      make(map[uint]int),
+		current:      make(map[uint]string),
 		pending:      make(map[uint]map[string][]pendingWatch),
 	}
 	if imp.httpClient == nil {
@@ -175,6 +177,20 @@ func (imp *Importer) JobStatus(jobID, userID uint) (*models.ImportJob, int, []st
 	skipped := imp.skipped[jobID]
 	imp.mu.Unlock()
 	return job, skipped, decodeUnresolved(job.Unresolved), nil
+}
+
+// CurrentItem returns the title the job is importing right now (empty once the
+// job is finished or between chunks).
+func (imp *Importer) CurrentItem(jobID uint) string {
+	imp.mu.Lock()
+	defer imp.mu.Unlock()
+	return imp.current[jobID]
+}
+
+func (imp *Importer) setCurrent(jobID uint, title string) {
+	imp.mu.Lock()
+	imp.current[jobID] = title
+	imp.mu.Unlock()
 }
 
 // Resolve imports the shows the user manually mapped (title → TMDB ID),
@@ -247,6 +263,7 @@ type epKey struct{ Season, Number int }
 
 // runState accumulates per-run bookkeeping.
 type runState struct {
+	jobID      uint
 	userID     uint
 	cache      map[string]*resolvedShow  // normalized title → show (nil = unresolvable)
 	unresolved []string                  // original titles, first-seen order
@@ -287,10 +304,13 @@ func (imp *Importer) run(jobID, userID uint, p *Payload) {
 
 	ctx := context.Background()
 	st := &runState{
+		jobID:   jobID,
 		userID:  userID,
 		cache:   make(map[string]*resolvedShow),
 		pending: make(map[string][]pendingWatch),
 	}
+	// Clear the "currently importing" label once the run ends, however it ends.
+	defer imp.setCurrent(jobID, "")
 
 	for _, f := range p.files {
 		for start := 0; start < len(f.records); start += chunkSize {
@@ -333,6 +353,8 @@ func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string
 		st.skipped++
 		return nil
 	}
+	// Surface what is being imported right now for the progress UI.
+	imp.setCurrent(st.jobID, title)
 
 	switch f.kind {
 	case kindGoodreads:

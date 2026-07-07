@@ -11,6 +11,8 @@ export interface ImportJob {
   total: number
   /** Malformed data rows skipped during processing. */
   skipped: number
+  /** Title being imported right now (present only while active). */
+  current?: string
   /** Show titles that could not be matched on TMDB. */
   unresolved: string[]
   error?: string

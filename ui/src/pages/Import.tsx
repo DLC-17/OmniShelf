@@ -138,7 +138,14 @@ function JobProgress({ jobId }: JobProgressProps) {
     return (
       <div className="stack">
         <p>
-          Importing… {job.processed} / {job.total} entries processed
+          {job.current !== undefined && job.current !== '' ? (
+            <>
+              Importing <strong>{job.current}</strong>…
+            </>
+          ) : (
+            'Importing…'
+          )}{' '}
+          {job.processed} / {job.total} entries processed
           {job.skipped > 0 && ` (${job.skipped} rows skipped)`}
         </p>
         <progress value={job.processed} max={Math.max(job.total, 1)} />
