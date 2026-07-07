@@ -501,3 +501,51 @@ func TestSeenExportAddsSeriesAndWatches(t *testing.T) {
 	require.NoError(t, e.db.Order("id").First(&watch).Error)
 	assert.Equal(t, 2008, watch.WatchedAt.Year())
 }
+
+// TestImportIsDBFirstViaAlias proves the pipeline is DB-first: with a cached
+// show, its episodes, and a title alias already present, an import resolves the
+// series and marks watches even though every TMDB call fails.
+func TestImportIsDBFirstViaAlias(t *testing.T) {
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(broken.Close)
+
+	e := newEnv(t, func(c *importer.Config) {
+		c.TMDB = tmdb.New("test-key",
+			tmdb.WithBaseURL(broken.URL),
+			tmdb.WithRateLimit(rate.NewLimiter(rate.Inf, 1)))
+	})
+
+	// Pre-seed the local cache and the title alias (as a prior import would).
+	show := models.Show{TMDBID: 1396, Title: "Breaking Bad", Status: "Ended"}
+	require.NoError(t, e.db.Create(&show).Error)
+	require.NoError(t, e.db.Create(&models.Episode{ShowID: show.ID, Season: 1, Number: 1, Title: "Pilot"}).Error)
+	require.NoError(t, e.db.Create(&models.Episode{ShowID: show.ID, Season: 1, Number: 2, Title: "Cat's in the Bag..."}).Error)
+	require.NoError(t, e.db.Create(&models.ShowAlias{NormTitle: "breaking bad", TMDBID: 1396}).Error)
+
+	jobID := e.startImport(t, map[string][]byte{
+		"tvtime_seen_export.csv": fixture(t, "tvtime_seen_export.csv"),
+	})
+	jr := e.waitForJob(t, jobID)
+
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 0, jr.Skipped)
+	assert.Empty(t, jr.Unresolved, "alias + cache resolve the series without TMDB")
+	assert.EqualValues(t, 1, count[models.Show](t, e.db), "no duplicate show")
+	assert.EqualValues(t, 1, count[models.TrackingItem](t, e.db, "type = ? AND external_id = ?", "TV", "1396"))
+	assert.EqualValues(t, 2, count[models.EpisodeWatch](t, e.db, "user_id = ?", 1))
+}
+
+// TestImportSavesAliasForReuse verifies a first import records the title→TMDB
+// alias so it is available to later imports.
+func TestImportSavesAliasForReuse(t *testing.T) {
+	e := newEnv(t)
+	e.waitForJob(t, e.startImport(t, map[string][]byte{
+		"tvtime_seen_export.csv": fixture(t, "tvtime_seen_export.csv"),
+	}))
+
+	var alias models.ShowAlias
+	require.NoError(t, e.db.Where("norm_title = ?", "breaking bad").First(&alias).Error)
+	assert.Equal(t, 1396, alias.TMDBID)
+}

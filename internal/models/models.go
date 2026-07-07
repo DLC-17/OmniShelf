@@ -71,6 +71,15 @@ type Book struct {
 	Description string // OpenLibrary work summary; may be empty
 }
 
+// ShowAlias remembers that an imported (normalized) series title resolved to a
+// TMDB id, so future imports of the same title skip the TMDB search entirely.
+type ShowAlias struct {
+	ID        uint   `gorm:"primaryKey"`
+	NormTitle string `gorm:"unique;not null"` // normalized imported title
+	TMDBID    int    `gorm:"not null;index"`
+	CreatedAt time.Time
+}
+
 // RejectedRec records a Discover suggestion the user dismissed, so it is not
 // suggested again. Keyed by (user, type, external id).
 type RejectedRec struct {
@@ -115,5 +124,6 @@ func All() []any {
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},
+		&ShowAlias{},
 	}
 }

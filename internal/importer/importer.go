@@ -224,6 +224,9 @@ func (imp *Importer) Resolve(jobID, userID uint, mappings map[string]int) (*mode
 			imp.saveUnresolved(job, unresolved)
 			return nil, fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
 		}
+		// Remember the hand-mapped title so a future import resolves it
+		// automatically.
+		imp.saveAlias(norm, tmdbID)
 		if err := imp.ensureTracking(userID, show); err != nil {
 			imp.saveUnresolved(job, unresolved)
 			return nil, err
@@ -422,6 +425,18 @@ func (imp *Importer) resolveTitle(ctx context.Context, title string, st *runStat
 		st.unresolved = append(st.unresolved, title)
 	}
 
+	// DB-first: a title resolved by a previous import maps straight to a TMDB
+	// id, and importShow then serves it from the cache with no TMDB calls.
+	if tmdbID, ok := imp.lookupAlias(norm); ok {
+		if show, epIDs, err := imp.importShow(ctx, tmdbID); err == nil {
+			rs := &resolvedShow{show: show, epIDs: epIDs}
+			st.cache[norm] = rs
+			return rs, true
+		}
+		// A stale alias (e.g. TMDB unreachable for an uncached show) falls
+		// through to a fresh search below.
+	}
+
 	sr, err := imp.tmdb.SearchTV(ctx, title)
 	if err != nil {
 		log.Printf("importer: search %q: %v", title, err)
@@ -439,16 +454,29 @@ func (imp *Importer) resolveTitle(ctx context.Context, title string, st *runStat
 		markUnresolved()
 		return nil, false
 	}
+	imp.saveAlias(norm, tmdbID) // remember for next time
 	rs := &resolvedShow{show: show, epIDs: epIDs}
 	st.cache[norm] = rs
 	return rs, true
 }
 
-// importShow upserts the Show row and all of its Episodes from TMDB,
-// returning the episode ID lookup keyed by (season, number). Upserts match
-// the unique indexes (shows.tmdb_id, episodes idx_show_ep) so re-imports and
-// overlap with the sync engine's rows are safe.
+// importShow returns the Show and its episode-ID lookup keyed by (season,
+// number). It is DB-first: a show already cached with its episodes is served
+// from the database with no TMDB calls. Otherwise it fetches from TMDB and
+// upserts against the unique indexes (shows.tmdb_id, episodes idx_show_ep) so
+// re-imports and overlap with the sync engine's rows are safe.
 func (imp *Importer) importShow(ctx context.Context, tmdbID int) (*models.Show, map[epKey]uint, error) {
+	// DB-first: reuse the cached show + episodes when present.
+	var cached models.Show
+	err := imp.db.Where(&models.Show{TMDBID: tmdbID}).First(&cached).Error
+	if err == nil {
+		if epIDs, ok := imp.loadEpisodeIDs(cached.ID); ok {
+			return &cached, epIDs, nil
+		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil, fmt.Errorf("cache lookup for show %d: %w", tmdbID, err)
+	}
+
 	detail, err := imp.tmdb.GetShow(ctx, tmdbID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetching show %d: %w", tmdbID, err)
@@ -570,6 +598,46 @@ func mapShelfStatus(shelf string) string {
 		return "PLAN_TO"
 	default:
 		return "READING"
+	}
+}
+
+// loadEpisodeIDs builds the (season, number) → episode-ID lookup for a cached
+// show. The bool is false when the show has no episodes yet, so the caller
+// falls back to a TMDB fetch.
+func (imp *Importer) loadEpisodeIDs(showID uint) (map[epKey]uint, bool) {
+	var eps []models.Episode
+	if err := imp.db.Select("id", "season", "number").
+		Where("show_id = ?", showID).Find(&eps).Error; err != nil {
+		return nil, false
+	}
+	if len(eps) == 0 {
+		return nil, false
+	}
+	m := make(map[epKey]uint, len(eps))
+	for _, e := range eps {
+		m[epKey{e.Season, e.Number}] = e.ID
+	}
+	return m, true
+}
+
+// lookupAlias returns the TMDB id a normalized title previously resolved to.
+func (imp *Importer) lookupAlias(norm string) (int, bool) {
+	var a models.ShowAlias
+	if err := imp.db.Where("norm_title = ?", norm).First(&a).Error; err != nil {
+		return 0, false
+	}
+	return a.TMDBID, true
+}
+
+// saveAlias remembers that a normalized title maps to a TMDB id so future
+// imports skip the TMDB search. Best-effort: a failure here never fails an
+// import.
+func (imp *Importer) saveAlias(norm string, tmdbID int) {
+	alias := models.ShowAlias{NormTitle: norm}
+	if err := imp.db.Where(&models.ShowAlias{NormTitle: norm}).
+		Attrs(map[string]any{"tmdb_id": tmdbID}).
+		FirstOrCreate(&alias).Error; err != nil {
+		log.Printf("importer: saving title alias %q → %d: %v", norm, tmdbID, err)
 	}
 }
 
