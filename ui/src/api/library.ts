@@ -1,6 +1,6 @@
 import { request } from './client'
 
-export type MediaType = 'TV' | 'BOOK' | 'GAME'
+export type MediaType = 'TV' | 'BOOK' | 'GAME' | 'MOVIE'
 
 /** All statuses across every media type; per-type validity is enforced server-side. */
 export type ItemStatus = 'WATCHING' | 'READING' | 'PLAYING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
@@ -8,6 +8,7 @@ export type ItemStatus = 'WATCHING' | 'READING' | 'PLAYING' | 'PLAN_TO' | 'COMPL
 export const TV_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const GAME_STATUSES: ItemStatus[] = ['PLAYING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
+export const MOVIE_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 
 export interface LibraryItem {
   id: number

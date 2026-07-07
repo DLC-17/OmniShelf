@@ -126,4 +126,36 @@ describe('Library page', () => {
 
     expect(await screen.findByText(/no items match these filters/i)).toBeInTheDocument()
   })
+
+  it('searches for and adds a movie from the Movies tab', async () => {
+    authed()
+    let added: number | null = null
+    server.use(
+      http.get(api('/api/library'), () => HttpResponse.json([])),
+      http.get(api('/api/movies/search'), () =>
+        HttpResponse.json({
+          results: [
+            { id: 27205, title: 'Inception', overview: 'A thief.', releaseDate: '2010-07-15', posterPath: '/x.jpg' },
+          ],
+        }),
+      ),
+      http.post(api('/api/movies'), async ({ request }) => {
+        added = ((await request.json()) as { tmdbId: number }).tmdbId
+        return HttpResponse.json({ movie: {}, item: {} }, { status: 201 })
+      }),
+    )
+
+    renderApp('/library')
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByRole('tab', { name: /movies/i }))
+    expect(await screen.findByText(/no movies yet/i)).toBeInTheDocument()
+
+    await user.type(await screen.findByLabelText(/search movies/i), 'inception')
+    await user.click(screen.getByRole('button', { name: /^search$/i }))
+
+    await user.click(await screen.findByRole('button', { name: /add inception/i }))
+    expect(added).toBe(27205)
+    expect(await screen.findByText('Added')).toBeInTheDocument()
+  })
 })

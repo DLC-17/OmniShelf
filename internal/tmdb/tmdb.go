@@ -140,6 +140,62 @@ type Season struct {
 	Episodes     []Episode `json:"episodes"`
 }
 
+// MovieResult is one movie entry from a TMDB movie search or recommendation
+// list. Movies use title/release_date where TV uses name/first_air_date.
+type MovieResult struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Overview    string `json:"overview"`
+	ReleaseDate string `json:"release_date"`
+	PosterPath  string `json:"poster_path"`
+}
+
+// MovieSearchResponse is the TMDB movie search / recommendations payload.
+type MovieSearchResponse struct {
+	Page         int           `json:"page"`
+	Results      []MovieResult `json:"results"`
+	TotalPages   int           `json:"total_pages"`
+	TotalResults int           `json:"total_results"`
+}
+
+// Movie is the TMDB movie detail payload.
+type Movie struct {
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Overview    string `json:"overview"`
+	Status      string `json:"status"` // "Released", "Post Production", ...
+	ReleaseDate string `json:"release_date"`
+	PosterPath  string `json:"poster_path"`
+}
+
+// SearchMovie searches TMDB movies by title.
+func (c *Client) SearchMovie(ctx context.Context, query string) (*MovieSearchResponse, error) {
+	var out MovieSearchResponse
+	q := url.Values{"query": {query}}
+	if err := c.get(ctx, "/search/movie", q, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetMovie fetches a movie's details (title, overview, poster, release date).
+func (c *Client) GetMovie(ctx context.Context, id int) (*Movie, error) {
+	var out Movie
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d", id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// MovieRecommendations returns TMDB's "recommended" movies for a given movie.
+func (c *Client) MovieRecommendations(ctx context.Context, movieID int) (*MovieSearchResponse, error) {
+	var out MovieSearchResponse
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d/recommendations", movieID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // SearchTV searches TMDB TV shows by name.
 func (c *Client) SearchTV(ctx context.Context, query string) (*SearchResponse, error) {
 	var out SearchResponse

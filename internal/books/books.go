@@ -28,9 +28,10 @@ import (
 
 // Media types stored in TrackingItem.Type.
 const (
-	TypeTV   = "TV"
-	TypeBook = "BOOK"
-	TypeGame = "GAME"
+	TypeTV    = "TV"
+	TypeBook  = "BOOK"
+	TypeGame  = "GAME"
+	TypeMovie = "MOVIE"
 )
 
 // Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING.
@@ -234,7 +235,7 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame {
+	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
 	}
 	if status != "" && !isKnownStatus(status) {
@@ -278,6 +279,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 
 	// Collect the external IDs to look up per media type.
 	var tmdbIDs []int
+	var movieTMDBIDs []int
 	var isbns []string
 	var barcodes []string
 	for _, it := range items {
@@ -285,6 +287,10 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		case TypeTV:
 			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
 				tmdbIDs = append(tmdbIDs, id)
+			}
+		case TypeMovie:
+			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
+				movieTMDBIDs = append(movieTMDBIDs, id)
 			}
 		case TypeBook:
 			isbns = append(isbns, it.ExternalID)
@@ -323,6 +329,16 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			gamesByBarcode[g.Barcode] = g
 		}
 	}
+	moviesByTMDB := map[string]models.Movie{}
+	if len(movieTMDBIDs) > 0 {
+		var rows []models.Movie
+		if err := s.db.WithContext(ctx).Where("tmdb_id IN ?", movieTMDBIDs).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading movie metadata: %w", err)
+		}
+		for _, m := range rows {
+			moviesByTMDB[strconv.Itoa(m.TMDBID)] = m
+		}
+	}
 
 	out := make([]LibraryEntry, 0, len(items))
 	for i := range items {
@@ -346,6 +362,11 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.ArtworkPath = g.CoverPath
 				entry.Platform = g.Platform
 				entry.Description = g.Description
+			}
+		case TypeMovie:
+			if m, ok := moviesByTMDB[it.ExternalID]; ok {
+				entry.ArtworkPath = m.PosterPath
+				entry.Description = m.Overview
 			}
 		}
 		out = append(out, entry)
@@ -460,14 +481,14 @@ func (s *Service) userItem(ctx context.Context, userID, itemID uint) (*models.Tr
 }
 
 // validStatus reports whether status is allowed for the media type:
-// TV → WATCHING, BOOK → READING, GAME → PLAYING, plus the shared
-// COMPLETED/PLAN_TO/STOPPED for all three.
+// TV/MOVIE → WATCHING, BOOK → READING, GAME → PLAYING, plus the shared
+// COMPLETED/PLAN_TO/STOPPED for all.
 func validStatus(typ, status string) bool {
 	switch status {
 	case StatusCompleted, StatusPlanTo, StatusStopped:
 		return true
 	case StatusWatching:
-		return typ == TypeTV
+		return typ == TypeTV || typ == TypeMovie
 	case StatusReading:
 		return typ == TypeBook
 	case StatusPlaying:

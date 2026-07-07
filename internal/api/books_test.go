@@ -257,7 +257,11 @@ func TestLibraryEndpoint(t *testing.T) {
 	assert.Len(t, list("?status=COMPLETED", cookie), 0)
 	assert.Len(t, list("", otherCookie), 0, "library is scoped to the current user")
 
-	w = doJSON(r, http.MethodGet, "/api/library?type=MOVIE", nil, cookie)
+	// MOVIE is a valid filter (the user just has none yet).
+	assert.Len(t, list("?type=MOVIE", cookie), 0)
+
+	// An unknown media type is still rejected.
+	w = doJSON(r, http.MethodGet, "/api/library?type=PODCAST", nil, cookie)
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	assertEnvelope(t, w, CodeInvalidRequest)
 }

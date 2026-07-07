@@ -71,6 +71,18 @@ type Book struct {
 	Description string // OpenLibrary work summary; may be empty
 }
 
+// Movie is the shared TMDB movie metadata cache (one row per movie, all
+// users). Unlike Show it has no seasons or episodes.
+type Movie struct {
+	ID           uint   `gorm:"primaryKey"`
+	TMDBID       int    `gorm:"unique;not null"`
+	Title        string `gorm:"not null"`
+	PosterPath   string // relative path under images dir
+	Overview     string
+	ReleaseDate  string // "YYYY-MM-DD" as returned by TMDB
+	LastSyncedAt time.Time
+}
+
 // Game is the shared ScanDex/IGDB metadata cache (one row per barcode, all
 // users). ScanDex supplies title, platform and the IGDB id; cover art is not
 // part of its payload, so CoverPath is usually empty.
@@ -135,6 +147,7 @@ func All() []any {
 		&EpisodeWatch{},
 		&Book{},
 		&Game{},
+		&Movie{},
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},

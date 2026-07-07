@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../../api/client'
-import { BOOK_STATUSES, GAME_STATUSES, TV_STATUSES } from '../../api/library'
+import { BOOK_STATUSES, GAME_STATUSES, MOVIE_STATUSES, TV_STATUSES } from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { useDeleteItem, useUpdateItem } from '../../hooks/useLibrary'
 import EpisodeList from '../tv/EpisodeList'
@@ -28,7 +28,14 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const isBook = item.type === 'BOOK'
   const isGame = item.type === 'GAME'
   const isTV = item.type === 'TV'
-  const statuses = isBook ? BOOK_STATUSES : isGame ? GAME_STATUSES : TV_STATUSES
+  const isMovie = item.type === 'MOVIE'
+  const statuses = isBook
+    ? BOOK_STATUSES
+    : isGame
+      ? GAME_STATUSES
+      : isMovie
+        ? MOVIE_STATUSES
+        : TV_STATUSES
 
   const runUpdate = (patch: { status?: ItemStatus; progress?: number; rating?: number }) => {
     setError(null)
@@ -123,13 +130,13 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
           </div>
         </div>
 
-        {(isBook || isGame) && item.description !== '' && (
+        {(isBook || isGame || isMovie) && item.description !== '' && (
           <div className="detail-summary">
             <h3>Summary</h3>
             <p>{item.description}</p>
           </div>
         )}
-        {(isBook || isGame) && item.description === '' && (
+        {(isBook || isGame || isMovie) && item.description === '' && (
           <p className="muted detail-summary">No summary available.</p>
         )}
 

@@ -257,7 +257,7 @@ func TestListItemsFilters(t *testing.T) {
 	require.Len(t, watching, 1)
 	assert.Equal(t, "100", watching[0].ExternalID)
 
-	_, err = svc.ListItems(ctx, 1, "MOVIE", "")
+	_, err = svc.ListItems(ctx, 1, "PODCAST", "")
 	assert.ErrorIs(t, err, ErrInvalidFilter)
 	_, err = svc.ListItems(ctx, 1, "", "BINGING")
 	assert.ErrorIs(t, err, ErrInvalidFilter)

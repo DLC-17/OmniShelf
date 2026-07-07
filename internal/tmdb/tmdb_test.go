@@ -55,6 +55,56 @@ func TestSearchTV(t *testing.T) {
 	assert.Equal(t, 2, res.TotalResults)
 }
 
+func TestSearchMovie(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/search/movie", r.URL.Path)
+		assert.Equal(t, "inception", r.URL.Query().Get("query"))
+		assert.Equal(t, "test-key", r.URL.Query().Get("api_key"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"page":1,"results":[{"id":27205,"title":"Inception","overview":"A thief.","release_date":"2010-07-15","poster_path":"/x.jpg"}],"total_results":1,"total_pages":1}`))
+	}))
+	defer srv.Close()
+
+	res, err := newTestClient(srv).SearchMovie(context.Background(), "inception")
+	require.NoError(t, err)
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, 27205, res.Results[0].ID)
+	assert.Equal(t, "Inception", res.Results[0].Title)
+	assert.Equal(t, "2010-07-15", res.Results[0].ReleaseDate)
+	assert.Equal(t, "/x.jpg", res.Results[0].PosterPath)
+}
+
+func TestGetMovie(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/movie/27205", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":27205,"title":"Inception","overview":"A thief.","status":"Released","release_date":"2010-07-15","poster_path":"/x.jpg"}`))
+	}))
+	defer srv.Close()
+
+	m, err := newTestClient(srv).GetMovie(context.Background(), 27205)
+	require.NoError(t, err)
+	assert.Equal(t, 27205, m.ID)
+	assert.Equal(t, "Inception", m.Title)
+	assert.Equal(t, "Released", m.Status)
+	assert.Equal(t, "/x.jpg", m.PosterPath)
+}
+
+func TestMovieRecommendations(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/movie/27205/recommendations", r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"page":1,"results":[{"id":348350,"title":"Solo","release_date":"2018-05-15","poster_path":"/s.jpg"}],"total_results":1,"total_pages":1}`))
+	}))
+	defer srv.Close()
+
+	res, err := newTestClient(srv).MovieRecommendations(context.Background(), 27205)
+	require.NoError(t, err)
+	require.Len(t, res.Results, 1)
+	assert.Equal(t, 348350, res.Results[0].ID)
+	assert.Equal(t, "Solo", res.Results[0].Title)
+}
+
 func TestGetShow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/tv/1399", r.URL.Path)

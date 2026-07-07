@@ -20,6 +20,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/images"
 	"github.com/davidlc1229/omnishelf/internal/importer"
+	"github.com/davidlc1229/omnishelf/internal/movies"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 	syncengine "github.com/davidlc1229/omnishelf/internal/sync"
@@ -88,6 +89,9 @@ func runServer() error {
 
 	tvSvc := tv.New(gdb, tmdbClient, imageStore)
 	api.RegisterTVRoutes(protected, tvSvc)
+
+	movieSvc := movies.New(gdb, tmdbClient, imageStore)
+	api.RegisterMovieRoutes(protected, movieSvc)
 
 	bookSvc := books.NewService(gdb, olClient, imageStore)
 	api.RegisterBookRoutes(protected, bookSvc)

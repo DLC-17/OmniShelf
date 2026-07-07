@@ -2,12 +2,11 @@ import { useState } from 'react'
 import { ApiError } from '../api/client'
 import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
+import MovieSearch from '../components/movies/MovieSearch'
 import Poster from '../components/tv/Poster'
 import { useLibrary } from '../hooks/useLibrary'
 
-type MediaTab = MediaType | 'MOVIE'
-
-const TABS: { value: MediaTab; label: string }[] = [
+const TABS: { value: MediaType; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
   { value: 'BOOK', label: 'Books' },
   { value: 'GAME', label: 'Games' },
@@ -19,6 +18,7 @@ const ACTIVE: Record<MediaType, { status: ItemStatus; label: string; stopped: st
   TV: { status: 'WATCHING', label: 'Watching', stopped: 'Stopped watching' },
   BOOK: { status: 'READING', label: 'Reading', stopped: 'Stopped reading' },
   GAME: { status: 'PLAYING', label: 'Playing', stopped: 'Stopped playing' },
+  MOVIE: { status: 'WATCHING', label: 'Watching', stopped: 'Stopped watching' },
 }
 
 /** Status sections shown in order, with media-specific labels. */
@@ -33,12 +33,13 @@ function sectionsFor(media: MediaType): { status: ItemStatus; label: string }[] 
 }
 
 /**
- * Library shelf: a cover-art grid toggled between TV shows, books, and movies
- * (coming soon). Clicking a cover opens the item's detail — summary, author,
- * length, a self-rating, inline status/progress editing, and delete.
+ * Library shelf: a cover-art grid toggled between TV shows, books, games and
+ * movies. Clicking a cover opens the item's detail — summary, author/platform,
+ * length, a self-rating, inline status/progress editing, and delete. The movies
+ * tab also carries a search-and-add box.
  */
 export default function Library() {
-  const [media, setMedia] = useState<MediaTab>('TV')
+  const [media, setMedia] = useState<MediaType>('TV')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [collapsed, setCollapsed] = useState<Set<ItemStatus>>(new Set())
 
@@ -50,8 +51,7 @@ export default function Library() {
       return next
     })
 
-  const isMovie = media === 'MOVIE'
-  const library = useLibrary({ type: isMovie ? '' : media }, !isMovie)
+  const library = useLibrary({ type: media })
 
   const items: LibraryItem[] = library.data ?? []
   const selected = items.find((i) => i.id === selectedId) ?? null
@@ -78,12 +78,8 @@ export default function Library() {
         ))}
       </div>
 
-      {isMovie && (
-        <p className="empty">Movies are coming soon — you’ll be able to track films here.</p>
-      )}
-
-      {!isMovie && library.isPending && <p className="muted">Loading your library…</p>}
-      {!isMovie && library.isError && (
+      {library.isPending && <p className="muted">Loading your library…</p>}
+      {library.isError && (
         <p role="alert" className="alert">
           {library.error instanceof ApiError
             ? library.error.message
@@ -91,16 +87,16 @@ export default function Library() {
         </p>
       )}
 
-      {!isMovie && library.data !== undefined && items.length === 0 && (
+      {library.data !== undefined && items.length === 0 && (
         <p className="empty">
-          No items match these filters. Add a show from Up Next or scan a book to start building your
-          shelf.
+          {media === 'MOVIE'
+            ? 'No movies yet. Search for one below to start your watchlist.'
+            : 'No items match these filters. Add a show from Up Next or scan a book to start building your shelf.'}
         </p>
       )}
 
-      {!isMovie &&
-        items.length > 0 &&
-        sectionsFor(media as MediaType).map(({ status, label }) => {
+      {items.length > 0 &&
+        sectionsFor(media).map(({ status, label }) => {
           const sectionItems = items.filter((i) => i.status === status)
           if (sectionItems.length === 0) return null
           const open = !collapsed.has(status)
@@ -135,6 +131,13 @@ export default function Library() {
             </section>
           )
         })}
+
+      {media === 'MOVIE' && (
+        <>
+          <hr />
+          <MovieSearch />
+        </>
+      )}
 
       {selected !== null && (
         <LibraryDetail item={selected} onClose={() => setSelectedId(null)} />
