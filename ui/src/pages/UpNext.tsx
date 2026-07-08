@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../api/client'
 import type { UpNextFilter } from '../api/tv'
-import ShowSearch from '../components/tv/ShowSearch'
 import UpNextCard from '../components/tv/UpNextCard'
 import { useMarkWatched, useUpNext } from '../hooks/useUpNext'
 
@@ -30,6 +29,7 @@ export default function UpNext() {
 
   return (
     <section>
+      
       <h1>Up Next</h1>
       <div className="tabs" role="tablist" aria-label="Up Next filter">
         {TABS.map((tab) => (
@@ -78,7 +78,7 @@ export default function UpNext() {
       )}
 
       <hr />
-      <ShowSearch />
+      
     </section>
   )
 }

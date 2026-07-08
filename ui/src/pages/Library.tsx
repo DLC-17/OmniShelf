@@ -4,7 +4,9 @@ import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
 import MovieSearch from '../components/movies/MovieSearch'
 import Poster from '../components/tv/Poster'
+import { BookScan, GameScan } from './Scan'
 import { useLibrary } from '../hooks/useLibrary'
+import ShowSearch from '../components/tv/ShowSearch'
 
 const TABS: { value: MediaType; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
@@ -59,7 +61,31 @@ export default function Library() {
   return (
     <section>
       <h1>Library</h1>
-
+      {media === 'TV' && (
+        <>
+        <ShowSearch />
+        <hr />
+        </>
+      )}
+      {media === 'BOOK' && (
+        <>
+        <BookScan />
+        <hr/>
+        </>
+      )}
+      {media=== 'GAME' && (
+        <>
+        <GameScan/>
+        <hr/>
+        </>
+      )}
+      {media === 'MOVIE' && (
+        <>
+          <MovieSearch />
+          <hr />
+        </>
+      )}
+      
       <div className="tabs" role="tablist" aria-label="Media type">
         {TABS.map((tab) => (
           <button
@@ -94,6 +120,7 @@ export default function Library() {
             : 'No items match these filters. Add a show from Up Next or scan a book to start building your shelf.'}
         </p>
       )}
+      
 
       {items.length > 0 &&
         sectionsFor(media).map(({ status, label }) => {
@@ -132,12 +159,7 @@ export default function Library() {
           )
         })}
 
-      {media === 'MOVIE' && (
-        <>
-          <hr />
-          <MovieSearch />
-        </>
-      )}
+      
 
       {selected !== null && (
         <LibraryDetail item={selected} onClose={() => setSelectedId(null)} />
