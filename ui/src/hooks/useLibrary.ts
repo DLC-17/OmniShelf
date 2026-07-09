@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { deleteItem, fetchLibrary, updateItem } from '../api/library'
+import { deleteItem, fetchLibrary, updateItem, updateOwnership } from '../api/library'
 import type { LibraryFilters, UpdateItemPatch } from '../api/library'
 import { UP_NEXT_KEY } from './useUpNext'
 
@@ -19,6 +19,17 @@ export function useUpdateItem() {
 
   return useMutation({
     mutationFn: ({ id, patch }: { id: number; patch: UpdateItemPatch }) => updateItem(id, patch),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY })
+    },
+  })
+}
+
+export function useUpdateOwnership() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, formats }: { id: number; formats: string[] }) => updateOwnership(id, formats),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: LIBRARY_KEY })
     },

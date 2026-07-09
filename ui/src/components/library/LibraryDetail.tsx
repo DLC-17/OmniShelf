@@ -1,9 +1,10 @@
 import { useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import { BOOK_STATUSES, GAME_STATUSES, MOVIE_STATUSES, TV_STATUSES } from '../../api/library'
+import { BOOK_STATUSES, GAME_OWNERSHIP, GAME_STATUSES, MOVIE_STATUSES, TV_STATUSES } from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
-import { useDeleteItem, useUpdateItem } from '../../hooks/useLibrary'
+import { useDeleteItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
+import OwnershipSelect from '../common/OwnershipSelect'
 import EpisodeList from '../tv/EpisodeList'
 import Poster from '../tv/Poster'
 import RatingStars from './RatingStars'
@@ -22,12 +23,16 @@ interface LibraryDetailProps {
 export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const update = useUpdateItem()
   const remove = useDeleteItem()
+  const updateOwnership = useUpdateOwnership()
   const refreshArt = useRefreshArtwork()
   const uploadArt = useUploadArtwork()
   const fileInput = useRef<HTMLInputElement>(null)
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progressDraft, setProgressDraft] = useState(String(item.progress))
+  // Locally-held ownership so toggles reflect immediately; reconciled to the
+  // server's canonical set on success and rolled back on error.
+  const [ownership, setOwnership] = useState<string[]>(item.ownership)
   // Locally-overridden cover src so a refresh/upload shows immediately. A
   // cache-busting query param forces the browser to re-fetch the same path.
   const [artwork, setArtwork] = useState(item.artworkPath)
@@ -61,6 +66,22 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
       return
     }
     if (parsed !== item.progress) runUpdate({ progress: parsed })
+  }
+
+  const handleOwnership = (next: string[]) => {
+    setError(null)
+    const prev = ownership
+    setOwnership(next) // optimistic
+    updateOwnership.mutate(
+      { id: item.id, formats: next },
+      {
+        onSuccess: (canonical) => setOwnership(canonical),
+        onError: (err) => {
+          setOwnership(prev)
+          setError(err instanceof ApiError ? err.message : 'Could not update ownership. Try again.')
+        },
+      },
+    )
   }
 
   const bust = (path: string) => (path === '' ? '' : `${path}?v=${Date.now()}`)
@@ -216,6 +237,19 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
                 </span>
               ))}
             </div>
+          </div>
+        )}
+
+        {isGame && (
+          <div className="detail-summary">
+            <h3>Ownership</h3>
+            <OwnershipSelect
+              options={GAME_OWNERSHIP}
+              selected={ownership}
+              disabled={updateOwnership.isPending}
+              onChange={handleOwnership}
+              label={`Ownership for ${item.title}`}
+            />
           </div>
         )}
 

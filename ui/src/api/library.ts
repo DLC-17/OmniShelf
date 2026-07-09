@@ -10,6 +10,12 @@ export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', '
 export const GAME_STATUSES: ItemStatus[] = ['PLAYING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const MOVIE_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 
+/**
+ * Fixed ownership-format option set for games (multi-select). The server
+ * validates against the same set; #11 adds a music equivalent (Vinyl, CD).
+ */
+export const GAME_OWNERSHIP: string[] = ['Physical', 'GOG']
+
 export interface LibraryItem {
   id: number
   type: MediaType
@@ -32,6 +38,8 @@ export interface LibraryItem {
   platform: string
   /** Source-derived tags/keywords (TMDB/IGDB/OpenLibrary); [] when none. */
   tags: string[]
+  /** User-selected ownership formats (games: Physical/GOG); [] when none. */
+  ownership: string[]
   updatedAt: string
 }
 
@@ -60,4 +68,15 @@ export function updateItem(id: number, patch: UpdateItemPatch): Promise<LibraryI
 
 export function deleteItem(id: number): Promise<void> {
   return request<void>(`/api/items/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Replaces the ownership formats on a tracked item (multi-select; pass the full
+ * set). Returns the server-normalized set in canonical order.
+ */
+export function updateOwnership(id: number, formats: string[]): Promise<string[]> {
+  return request<{ ownership: string[] }>(`/api/items/${id}/ownership`, {
+    method: 'PUT',
+    body: { formats },
+  }).then((r) => r.ownership)
 }
