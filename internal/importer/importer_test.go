@@ -192,13 +192,14 @@ func (e *env) startImport(t *testing.T, files map[string][]byte) uint {
 }
 
 type jobResponse struct {
-	JobID      uint     `json:"jobId"`
-	Status     string   `json:"status"`
-	Processed  int      `json:"processed"`
-	Total      int      `json:"total"`
-	Skipped    int      `json:"skipped"`
-	Unresolved []string `json:"unresolved"`
-	Error      string   `json:"error"`
+	JobID        uint     `json:"jobId"`
+	Status       string   `json:"status"`
+	Processed    int      `json:"processed"`
+	Total        int      `json:"total"`
+	Skipped      int      `json:"skipped"`
+	NotesCreated int      `json:"notesCreated"`
+	Unresolved   []string `json:"unresolved"`
+	Error        string   `json:"error"`
 }
 
 func (e *env) getStatus(t *testing.T, jobID uint) jobResponse {
@@ -474,6 +475,116 @@ func bookItem(t *testing.T, gdb *gorm.DB, isbn13 string) models.TrackingItem {
 	var item models.TrackingItem
 	require.NoError(t, gdb.Where("type = ? AND external_id = ?", "BOOK", isbn13).First(&item).Error)
 	return item
+}
+
+// ── Goodreads notes import ──
+
+// trackBook seeds a shared Book row plus a BOOK TrackingItem for the user, as
+// a prior book scan would, so the notes import has something to match against.
+func trackBook(t *testing.T, gdb *gorm.DB, userID uint, isbn13, title, authors string) models.TrackingItem {
+	t.Helper()
+	require.NoError(t, gdb.Create(&models.Book{ISBN13: isbn13, Title: title, Authors: authors}).Error)
+	item := models.TrackingItem{UserID: userID, Type: "BOOK", ExternalID: isbn13, Title: title, Status: "READING"}
+	require.NoError(t, gdb.Create(&item).Error)
+	return item
+}
+
+// uploadNotes posts a Goodreads export to the notes-import endpoint.
+func (e *env) uploadNotes(t *testing.T, files map[string][]byte) *httptest.ResponseRecorder {
+	t.Helper()
+	body, ctype := multipartBody(t, files)
+	req := httptest.NewRequest(http.MethodPost, "/api/books/notes/import", body)
+	req.Header.Set("Content-Type", ctype)
+	return e.do(t, req)
+}
+
+// startNotesImport uploads to the notes endpoint and returns the accepted job ID.
+func (e *env) startNotesImport(t *testing.T, files map[string][]byte) uint {
+	t.Helper()
+	rec := e.uploadNotes(t, files)
+	require.Equal(t, http.StatusAccepted, rec.Code, rec.Body.String())
+	var resp struct {
+		JobID uint `json:"jobId"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotZero(t, resp.JobID)
+	return resp.JobID
+}
+
+func notesCSV(t *testing.T) map[string][]byte {
+	return map[string][]byte{"goodreads_notes_export.csv": fixture(t, "goodreads_notes_export.csv")}
+}
+
+// TestGoodreadsNotesImport imports Goodreads "My Review" text as book notes.
+// The fixture exercises every outcome the report distinguishes: an ISBN-13
+// match (Dune), a title+author fallback match on an ISBN-less row (The Hobbit),
+// a reviewed-but-untracked book (Neuromancer → unmatched), and a row with no
+// review (the second Dune row → skipped).
+func TestGoodreadsNotesImport(t *testing.T) {
+	e := newEnv(t)
+	dune := trackBook(t, e.db, 1, "9780441013593", "Dune", "Frank Herbert")
+	hobbit := trackBook(t, e.db, 1, "9780547928227", "The Hobbit", "J.R.R. Tolkien")
+
+	jr := e.waitForJob(t, e.startNotesImport(t, notesCSV(t)))
+
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 4, jr.Total)
+	assert.Equal(t, 4, jr.Processed)
+	assert.Equal(t, 2, jr.NotesCreated, "Dune (ISBN) + The Hobbit (title/author)")
+	assert.Equal(t, 1, jr.Skipped, "the review-less Dune row")
+	assert.Equal(t, []string{"Neuromancer"}, jr.Unresolved, "reviewed but not tracked")
+
+	assert.EqualValues(t, 2, count[models.BookNote](t, e.db, "user_id = ?", 1))
+
+	// The ISBN match backdates the note to Date Read (2019/05/01).
+	var duneNote models.BookNote
+	require.NoError(t, e.db.Where("item_id = ?", dune.ID).First(&duneNote).Error)
+	assert.Equal(t, "A landmark of science fiction.", duneNote.Body)
+	assert.Equal(t, 2019, duneNote.CreatedAt.Year())
+
+	// The Hobbit row has no Date Read, so it backdates to Date Added (2020/03/03).
+	var hobbitNote models.BookNote
+	require.NoError(t, e.db.Where("item_id = ?", hobbit.ID).First(&hobbitNote).Error)
+	assert.Equal(t, 2020, hobbitNote.CreatedAt.Year())
+}
+
+// TestGoodreadsNotesReimportIsIdempotent proves an identical review re-imported
+// creates no duplicate note.
+func TestGoodreadsNotesReimportIsIdempotent(t *testing.T) {
+	e := newEnv(t)
+	trackBook(t, e.db, 1, "9780441013593", "Dune", "Frank Herbert")
+	trackBook(t, e.db, 1, "9780547928227", "The Hobbit", "J.R.R. Tolkien")
+
+	first := e.waitForJob(t, e.startNotesImport(t, notesCSV(t)))
+	require.Equal(t, 2, first.NotesCreated)
+
+	second := e.waitForJob(t, e.startNotesImport(t, notesCSV(t)))
+	assert.Equal(t, importer.StatusDone, second.Status)
+	assert.Equal(t, 0, second.NotesCreated, "identical reviews are deduped")
+	assert.EqualValues(t, 2, count[models.BookNote](t, e.db, "user_id = ?", 1), "no duplicate notes")
+}
+
+// TestNotesImportRejectsNonGoodreadsFile guards the notes endpoint's up-front
+// validation: a TV Time export has no ISBN/My Review columns and is rejected
+// with 400 before any job is created.
+func TestNotesImportRejectsNonGoodreadsFile(t *testing.T) {
+	e := newEnv(t)
+	rec := e.uploadNotes(t, map[string][]byte{"followed_shows.csv": fixture(t, "followed_shows.csv")})
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.EqualValues(t, 0, count[models.ImportJob](t, e.db), "no job row created")
+}
+
+// TestNotesImportOnlyMatchesOwnBooks confirms matching is user-scoped: a book
+// tracked by another user is not a match, so its review is reported unmatched.
+func TestNotesImportOnlyMatchesOwnBooks(t *testing.T) {
+	e := newEnv(t)
+	trackBook(t, e.db, 2, "9780441013593", "Dune", "Frank Herbert") // other user
+
+	jr := e.waitForJob(t, e.startNotesImport(t, notesCSV(t)))
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 0, jr.NotesCreated)
+	assert.EqualValues(t, 0, count[models.BookNote](t, e.db))
+	assert.Contains(t, jr.Unresolved, "Dune", "another user's book is not matched")
 }
 
 // TestSeenExportAddsSeriesAndWatches verifies a standalone TV Time "seen

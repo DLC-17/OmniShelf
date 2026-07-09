@@ -71,6 +71,19 @@ type Book struct {
 	Description string // OpenLibrary work summary; may be empty
 }
 
+// BookNote is a per-user free-text note attached to a tracked BOOK
+// TrackingItem (e.g. a Goodreads "My Review"). CreatedAt may be backdated to
+// the review's original date on import. UserID is carried alongside ItemID so
+// a note can be owner-scoped without joining the tracking item.
+type BookNote struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"not null;index"`
+	ItemID    uint   `gorm:"not null;index"` // TrackingItem.ID (a BOOK item)
+	Body      string `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // Movie is the shared TMDB movie metadata cache (one row per movie, all
 // users). Unlike Show it has no seasons or episodes.
 type Movie struct {
@@ -146,6 +159,7 @@ func All() []any {
 		&Episode{},
 		&EpisodeWatch{},
 		&Book{},
+		&BookNote{},
 		&Game{},
 		&Movie{},
 		&ImportJob{},

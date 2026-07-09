@@ -6,6 +6,7 @@ import {
   isImportJobActive,
   resolveImport,
   uploadImport,
+  uploadNotesImport,
   type ImportJob,
 } from '../api/imports'
 
@@ -179,10 +180,10 @@ function JobProgress({ jobId }: JobProgressProps) {
 }
 
 /**
- * TV Time import wizard: upload the export → poll job progress →
- * resolve any unmatched titles manually.
+ * TV Time / Goodreads-library history import: upload the export → poll job
+ * progress → resolve any unmatched titles manually.
  */
-export default function Import() {
+function HistoryImport() {
   const [files, setFiles] = useState<File[]>([])
   const [jobId, setJobId] = useState<number | null>(null)
 
@@ -198,8 +199,8 @@ export default function Import() {
   }
 
   return (
-    <section>
-      <h1>Import</h1>
+    <div className="stack">
+      <h2>History</h2>
       <p>
         Import your history — TV Time (<code>followed_shows.csv</code> /{' '}
         <code>seen_episodes.csv</code>) or a Goodreads{' '}
@@ -241,6 +242,155 @@ export default function Import() {
           </button>
         </>
       )}
+    </div>
+  )
+}
+
+/** Polls a notes-import job and reports notes created / rows skipped / books not on the shelf. */
+function NotesJobProgress({ jobId }: JobProgressProps) {
+  const {
+    data: job,
+    isPending,
+    isError,
+  } = useQuery({
+    queryKey: ['importJob', jobId],
+    queryFn: () => fetchImportJob(jobId),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status !== undefined && isImportJobActive(status) ? POLL_INTERVAL_MS : false
+    },
+  })
+
+  if (isPending) {
+    return <p className="muted">Checking import status…</p>
+  }
+  if (isError) {
+    return <p role="alert" className="alert">Could not fetch import status. Try reloading.</p>
+  }
+
+  if (isImportJobActive(job.status)) {
+    return (
+      <div className="stack">
+        <p>Importing reviews… {job.processed} / {job.total} rows processed</p>
+        <progress value={job.processed} max={Math.max(job.total, 1)} />
+      </div>
+    )
+  }
+
+  if (job.status === 'FAILED') {
+    return (
+      <p role="alert" className="alert">
+        Import failed: {job.error !== undefined && job.error !== '' ? job.error : 'unknown error'}
+      </p>
+    )
+  }
+
+  // DONE
+  return (
+    <div>
+      <p className="notice">
+        Import complete: {job.notesCreated} note{job.notesCreated === 1 ? '' : 's'} created from{' '}
+        {job.total} rows
+        {job.skipped > 0 && `, ${job.skipped} without a review`}
+        {job.unresolved.length > 0 &&
+          `, ${job.unresolved.length} reviewed book${job.unresolved.length === 1 ? '' : 's'} not on your shelf`}
+        .
+      </p>
+      {job.unresolved.length > 0 && (
+        <>
+          <p>
+            These reviewed books aren&apos;t in your library, so their notes were skipped. Add the
+            book first, then re-import to attach its note.
+          </p>
+          <ul className="list">
+            {job.unresolved.map((title) => (
+              <li key={title} className="card card-row wrap">
+                <span className="grow">{title}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Goodreads reviews → book notes: upload a Goodreads library export and its
+ * "My Review" column is attached as a note to each matching tracked book.
+ */
+function NotesImport() {
+  const [files, setFiles] = useState<File[]>([])
+  const [jobId, setJobId] = useState<number | null>(null)
+
+  const upload = useMutation({
+    mutationFn: uploadNotesImport,
+    onSuccess: ({ jobId: created }) => setJobId(created),
+  })
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    if (files.length === 0 || upload.isPending) return
+    upload.mutate(files)
+  }
+
+  return (
+    <div className="stack">
+      <h2>Goodreads reviews → notes</h2>
+      <p>
+        Turn your Goodreads reviews into book notes. Upload the same{' '}
+        <code>library_export.csv</code>; each <code>My Review</code> becomes a note on the matching
+        book you already track (by ISBN, then title/author). Books you don&apos;t track yet are
+        skipped.
+      </p>
+
+      {jobId === null ? (
+        <form className="stack" onSubmit={handleSubmit} style={{ maxWidth: '32rem' }}>
+          <label className="field">
+            <span>Goodreads export</span>
+            <input
+              type="file"
+              accept=".csv,.zip"
+              multiple
+              onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+            />
+          </label>
+          <div>
+            <button type="submit" className="btn-primary" disabled={files.length === 0 || upload.isPending}>
+              {upload.isPending ? 'Uploading…' : 'Import reviews'}
+            </button>
+          </div>
+          {upload.isError && <p role="alert" className="alert">{uploadErrorMessage(upload.error)}</p>}
+        </form>
+      ) : (
+        <>
+          <NotesJobProgress jobId={jobId} />
+          <button
+            type="button"
+            className="btn-ghost"
+            onClick={() => {
+              setJobId(null)
+              setFiles([])
+              upload.reset()
+            }}
+            style={{ marginTop: '1rem' }}
+          >
+            Import another file
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Import hub: history (TV Time / Goodreads library) and Goodreads review notes. */
+export default function Import() {
+  return (
+    <section className="stack">
+      <h1>Import</h1>
+      <HistoryImport />
+      <hr />
+      <NotesImport />
     </section>
   )
 }
