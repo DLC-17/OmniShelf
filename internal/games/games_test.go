@@ -61,6 +61,7 @@ func fullGame() *scandex.Game {
 type fakeEnricher struct {
 	games         map[int]*igdb.Game
 	searchResults []igdb.SearchResult
+	similar       map[int][]igdb.SimilarGame
 	err           error
 }
 
@@ -76,6 +77,13 @@ func (f *fakeEnricher) SearchGames(_ context.Context, _ string) ([]igdb.SearchRe
 		return nil, f.err
 	}
 	return f.searchResults, nil
+}
+
+func (f *fakeEnricher) SimilarGames(_ context.Context, _ []int) (map[int][]igdb.SimilarGame, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.similar, nil
 }
 
 func (f *fakeEnricher) CoverURL(imageID, _ string) string {
@@ -336,4 +344,64 @@ func TestAddByIGDBAlreadyTracked(t *testing.T) {
 	_, item, err := svc.AddByIGDB(context.Background(), 1, 7346, StatusPlaying)
 	require.ErrorIs(t, err, ErrAlreadyTracked)
 	require.NotNil(t, item)
+}
+
+// Discover surfaces IGDB "similar games" seeded from a tracked game, filters the
+// game the user already tracks, caches covers through internal/images, and tags
+// each suggestion with the tracked game it came from.
+func TestDiscoverSimilarGamesDedupesTracked(t *testing.T) {
+	enr := &fakeEnricher{
+		games: map[int]*igdb.Game{7346: {ID: 7346, Name: "Zelda"}},
+		similar: map[int][]igdb.SimilarGame{
+			7346: {
+				{ID: 1234, Name: "Okami", Year: 2006, CoverImageID: "cov1"},
+				{ID: 7346, Name: "Zelda", CoverImageID: "cov2"}, // self → filtered as tracked
+			},
+		},
+	}
+	imgs := &fakeImages{}
+	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, imgs)
+	ctx := context.Background()
+
+	// Track Zelda by IGDB id so it becomes a discover seed.
+	_, _, err := svc.AddByIGDB(ctx, 1, 7346, StatusPlaying)
+	require.NoError(t, err)
+
+	items, err := svc.Discover(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, items, 1, "the tracked seed game is filtered from its own similars")
+	assert.Equal(t, 1234, items[0].IGDBID)
+	assert.Equal(t, "Okami", items[0].Title)
+	assert.Equal(t, 2006, items[0].Year)
+	assert.Equal(t, "Zelda", items[0].SuggestedBy)
+	// Cover cached through internal/images, keyed by IGDB id (never hotlinked).
+	assert.Equal(t, "game/igdb-1234.jpg", items[0].CoverPath)
+	assert.Contains(t, imgs.fetched, "igdb-1234")
+}
+
+// A rejected game is not surfaced again by Discover.
+func TestDiscoverExcludesRejectedGame(t *testing.T) {
+	enr := &fakeEnricher{
+		games:   map[int]*igdb.Game{7346: {ID: 7346, Name: "Zelda"}},
+		similar: map[int][]igdb.SimilarGame{7346: {{ID: 1234, Name: "Okami"}}},
+	}
+	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, &fakeImages{})
+	ctx := context.Background()
+
+	_, _, err := svc.AddByIGDB(ctx, 1, 7346, StatusPlaying)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.RejectRec(ctx, 1, 1234))
+	items, err := svc.Discover(ctx, 1)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+// Without an enricher (no IGDB credentials) Discover degrades to empty, not an
+// error.
+func TestDiscoverWithoutEnricher(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{})
+	items, err := svc.Discover(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Empty(t, items)
 }

@@ -6,6 +6,7 @@ import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
 import { useDeleteItem, useUpdateItem } from '../../hooks/useLibrary'
 import EpisodeList from '../tv/EpisodeList'
 import Poster from '../tv/Poster'
+import BookNotes from './BookNotes'
 import RatingStars from './RatingStars'
 
 interface LibraryDetailProps {
@@ -225,6 +226,8 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
             <EpisodeList showId={item.showId} />
           </div>
         )}
+
+        {isBook && <BookNotes itemId={item.id} />}
 
         {error !== null && (
           <p role="alert" className="alert">

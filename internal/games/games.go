@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
@@ -74,6 +75,7 @@ type MetadataClient interface {
 type Enricher interface {
 	GetGame(ctx context.Context, igdbID int) (*igdb.Game, error)
 	SearchGames(ctx context.Context, name string) ([]igdb.SearchResult, error)
+	SimilarGames(ctx context.Context, seedIDs []int) (map[int][]igdb.SimilarGame, error)
 	CoverURL(imageID, size string) string
 }
 
@@ -416,6 +418,157 @@ func gameExternalID(game *models.Game) string {
 		return strconv.Itoa(game.IGDBID)
 	}
 	return game.Barcode
+}
+
+// DiscoverItem is one game recommendation for the Discover page: an IGDB game
+// the user does not track yet, tagged with the tracked game it was suggested
+// from. CoverPath is a relative /images path (IGDB covers are cached through
+// internal/images, never hotlinked from the frontend); "" means the UI shows a
+// placeholder.
+type DiscoverItem struct {
+	IGDBID      int
+	Title       string
+	Year        int
+	CoverPath   string
+	SuggestedBy string // title of the tracked game this came from
+}
+
+const (
+	maxDiscoverSources = 5  // tracked games to seed similar-games from
+	maxDiscoverResults = 24 // total suggestions returned
+)
+
+// Discover suggests games via IGDB "similar games" seeded from the user's most
+// recently updated tracked games. It excludes anything already tracked or
+// previously rejected, dedupes across seeds, caches each suggestion's cover
+// through internal/images, and tags each with the tracked game it came from.
+// Returns an empty slice (not an error) when IGDB is unconfigured or the user
+// tracks no games with a usable IGDB seed id.
+func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, error) {
+	if s.enrich == nil {
+		return []DiscoverItem{}, nil
+	}
+
+	var sources []models.TrackingItem
+	if err := s.db.WithContext(ctx).
+		Where("user_id = ? AND type = ?", userID, TypeGame).
+		Order("updated_at DESC").Limit(maxDiscoverSources).
+		Find(&sources).Error; err != nil {
+		return nil, fmt.Errorf("games: discover sources: %w", err)
+	}
+	if len(sources) == 0 {
+		return []DiscoverItem{}, nil
+	}
+
+	// A tracked game is keyed by its IGDB id (games.gameExternalID); seeds come
+	// from those ids. Remember each seed's title so a suggestion can name the
+	// game it was suggested from. Legacy barcode-keyed items have no IGDB seed
+	// and are skipped (they parse to a number no IGDB game matches).
+	seedTitle := map[int]string{}
+	seedIDs := make([]int, 0, len(sources))
+	for _, src := range sources {
+		id, err := strconv.Atoi(src.ExternalID)
+		if err != nil || id == 0 {
+			continue
+		}
+		if _, ok := seedTitle[id]; !ok {
+			seedIDs = append(seedIDs, id)
+		}
+		seedTitle[id] = src.Title
+	}
+	if len(seedIDs) == 0 {
+		return []DiscoverItem{}, nil
+	}
+
+	tracked, err := s.gameExternalIDSet(ctx, userID, &models.TrackingItem{})
+	if err != nil {
+		return nil, err
+	}
+	rejected, err := s.gameExternalIDSet(ctx, userID, &models.RejectedRec{})
+	if err != nil {
+		return nil, err
+	}
+
+	similarBySeed, err := s.enrich.SimilarGames(ctx, seedIDs)
+	if err != nil {
+		if errors.Is(err, igdb.ErrUnconfigured) {
+			return []DiscoverItem{}, nil
+		}
+		return nil, errors.Join(ErrUpstream, err)
+	}
+
+	seen := map[int]bool{}
+	out := make([]DiscoverItem, 0, maxDiscoverResults)
+	for _, seedID := range seedIDs {
+		if len(out) >= maxDiscoverResults {
+			break
+		}
+		for _, sg := range similarBySeed[seedID] {
+			if len(out) >= maxDiscoverResults {
+				break
+			}
+			if sg.ID == 0 || tracked[sg.ID] || rejected[sg.ID] || seen[sg.ID] {
+				continue
+			}
+			seen[sg.ID] = true
+			out = append(out, DiscoverItem{
+				IGDBID:      sg.ID,
+				Title:       sg.Name,
+				Year:        sg.Year,
+				CoverPath:   s.discoverCover(ctx, sg.ID, sg.CoverImageID),
+				SuggestedBy: seedTitle[seedID],
+			})
+		}
+	}
+	return out, nil
+}
+
+// discoverCover best-effort caches a discover suggestion's IGDB cover through
+// internal/images and returns its relative path. The file is keyed by the game's
+// IGDB id ("game/igdb-<id>.jpg"), matching the name-search add path, so adding a
+// suggestion later reuses the same cached cover. A missing image id, nil image
+// store, or failed download yields "" (the UI shows a placeholder).
+func (s *Service) discoverCover(ctx context.Context, igdbID int, imageID string) string {
+	if s.images == nil || imageID == "" {
+		return ""
+	}
+	url := s.enrich.CoverURL(imageID, "")
+	if url == "" {
+		return ""
+	}
+	path, err := s.images.Fetch(ctx, s.httpClient, url, "game", "igdb-"+strconv.Itoa(igdbID))
+	if err != nil {
+		log.Printf("games: discover cover download for igdb %d failed: %v", igdbID, err)
+		return ""
+	}
+	return path
+}
+
+// gameExternalIDSet loads the user's GAME external IDs from the given model
+// (TrackingItem or RejectedRec) as a set of IGDB ids.
+func (s *Service) gameExternalIDSet(ctx context.Context, userID uint, model any) (map[int]bool, error) {
+	var rows []struct{ ExternalID string }
+	if err := s.db.WithContext(ctx).Model(model).
+		Where("user_id = ? AND type = ?", userID, TypeGame).
+		Select("external_id").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("games: load external ids: %w", err)
+	}
+	set := make(map[int]bool, len(rows))
+	for _, r := range rows {
+		if id, err := strconv.Atoi(r.ExternalID); err == nil {
+			set[id] = true
+		}
+	}
+	return set, nil
+}
+
+// RejectRec hides a game suggestion so Discover will not surface it again.
+func (s *Service) RejectRec(ctx context.Context, userID uint, igdbID int) error {
+	rec := models.RejectedRec{UserID: userID, Type: TypeGame, ExternalID: strconv.Itoa(igdbID)}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rec).Error; err != nil {
+		return fmt.Errorf("games: reject recommendation: %w", err)
+	}
+	return nil
 }
 
 // validStatus reports whether status is allowed for a game.

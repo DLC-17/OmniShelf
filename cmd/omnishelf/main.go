@@ -104,6 +104,7 @@ func runServer() error {
 	bookSvc := books.NewService(gdb, olClient, imageStore)
 	api.RegisterBookRoutes(protected, bookSvc)
 	api.RegisterLibraryRoutes(protected, bookSvc)
+	api.RegisterNoteRoutes(protected, bookSvc)
 
 	gameSvc := games.NewService(gdb, scandexClient, igdbClient, imageStore)
 	api.RegisterGameRoutes(protected, gameSvc)

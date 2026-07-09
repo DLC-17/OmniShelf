@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
@@ -83,6 +84,8 @@ var (
 type MetadataClient interface {
 	GetByISBN(ctx context.Context, isbn string) (*openlibrary.Book, error)
 	SearchByTitle(ctx context.Context, title string) ([]openlibrary.TitleResult, error)
+	SearchByAuthor(ctx context.Context, authorName string) ([]openlibrary.TitleResult, error)
+	SearchBySubject(ctx context.Context, subject string) ([]openlibrary.TitleResult, error)
 	ListEditions(ctx context.Context, workKey string) ([]openlibrary.Edition, error)
 	CoverURL(coverID int, size string) string
 }
@@ -512,6 +515,14 @@ func (s *Service) DeleteItem(ctx context.Context, userID, itemID uint) error {
 				return err
 			}
 		}
+		if item.Type == TypeBook {
+			// Journal entries are per-user and tied to this item; prune them so
+			// untracking leaves no orphaned notes.
+			if err := tx.Where("user_id = ? AND item_id = ?", userID, item.ID).
+				Delete(&models.BookNote{}).Error; err != nil {
+				return fmt.Errorf("deleting notes for item %d: %w", item.ID, err)
+			}
+		}
 		if err := tx.Delete(&models.TrackingItem{}, item.ID).Error; err != nil {
 			return fmt.Errorf("deleting item %d: %w", item.ID, err)
 		}
@@ -559,6 +570,253 @@ func (s *Service) userItem(ctx context.Context, userID, itemID uint) (*models.Tr
 		return nil, fmt.Errorf("looking up item %d: %w", itemID, err)
 	}
 	return &item, nil
+}
+
+// DiscoverItem is one book recommendation for the Discover page: an OpenLibrary
+// work the user does not track yet, tagged with the author or subject it was
+// suggested from. Identity is the WorkKey ("/works/OL...W"); the add-to-library
+// flow lists the work's editions to pick an ISBN. CoverPath is a relative
+// /images path (OpenLibrary covers are cached through internal/images, never
+// hotlinked from the frontend); "" means the UI shows a placeholder.
+type DiscoverItem struct {
+	WorkKey     string
+	Title       string
+	Authors     string // comma-joined
+	Year        int    // first publication year; 0 when unknown
+	CoverPath   string
+	SuggestedBy string // "books by <author>" or an OpenLibrary subject
+}
+
+const (
+	maxBookDiscoverSources  = 5  // most-recent tracked books to seed from
+	maxBookDiscoverAuthors  = 5  // distinct authors to pull more works by
+	maxBookDiscoverSubjects = 3  // distinct subjects to pull more works from
+	maxBookDiscoverResults  = 24 // total suggestions returned
+)
+
+// Discover suggests books via an author/subject heuristic seeded from the user's
+// most recently updated tracked books: more works by the same authors and in the
+// same OpenLibrary subjects. It excludes books the user already tracks (matched
+// by normalized title, since tracked books are keyed by ISBN and candidates are
+// works) or has previously rejected (by work key), dedupes, and caches each
+// suggestion's cover through internal/images. A failing lookup is skipped, not
+// fatal. Returns an empty slice when the user tracks no books.
+func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, error) {
+	// Seeds: the most recently updated tracked books, for their authors/subjects.
+	var sources []models.TrackingItem
+	if err := s.db.WithContext(ctx).
+		Where("user_id = ? AND type = ?", userID, TypeBook).
+		Order("updated_at DESC").Limit(maxBookDiscoverSources).
+		Find(&sources).Error; err != nil {
+		return nil, fmt.Errorf("books: discover sources: %w", err)
+	}
+	if len(sources) == 0 {
+		return []DiscoverItem{}, nil
+	}
+
+	// Load the seed books' cache rows to read their authors and, via their ids,
+	// their source-derived subjects.
+	isbns := make([]string, 0, len(sources))
+	for _, src := range sources {
+		isbns = append(isbns, src.ExternalID)
+	}
+	var seedBooks []models.Book
+	if err := s.db.WithContext(ctx).Where("isbn13 IN ?", isbns).Find(&seedBooks).Error; err != nil {
+		return nil, fmt.Errorf("books: load seed books: %w", err)
+	}
+
+	authors := make([]string, 0, maxBookDiscoverAuthors)
+	authorSeen := map[string]bool{}
+	bookIDs := make([]uint, 0, len(seedBooks))
+	for _, b := range seedBooks {
+		bookIDs = append(bookIDs, b.ID)
+		for _, a := range splitAuthors(b.Authors) {
+			key := strings.ToLower(a)
+			if authorSeen[key] || len(authors) >= maxBookDiscoverAuthors {
+				continue
+			}
+			authorSeen[key] = true
+			authors = append(authors, a)
+		}
+	}
+	subjects := s.discoverSubjects(ctx, bookIDs)
+
+	// Dedupe sets: every tracked book title (normalized) and every rejected work.
+	trackedTitles, err := s.trackedBookTitleSet(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	rejected, err := s.bookRejectedSet(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	seen := map[string]bool{}
+	out := make([]DiscoverItem, 0, maxBookDiscoverResults)
+	for _, a := range authors {
+		if len(out) >= maxBookDiscoverResults {
+			break
+		}
+		works, werr := s.metadata.SearchByAuthor(ctx, a)
+		if werr != nil {
+			log.Printf("books: discover by author %q: %v", a, werr)
+			continue
+		}
+		s.appendDiscoverCandidates(ctx, works, "books by "+a, trackedTitles, rejected, seen, &out)
+	}
+	for _, subj := range subjects {
+		if len(out) >= maxBookDiscoverResults {
+			break
+		}
+		works, werr := s.metadata.SearchBySubject(ctx, subj)
+		if werr != nil {
+			log.Printf("books: discover by subject %q: %v", subj, werr)
+			continue
+		}
+		s.appendDiscoverCandidates(ctx, works, subj, trackedTitles, rejected, seen, &out)
+	}
+	return out, nil
+}
+
+// appendDiscoverCandidates filters works against the tracked/rejected/seen sets,
+// caches their covers, and appends them (tagged with suggestedBy) to out until
+// the result cap is reached.
+func (s *Service) appendDiscoverCandidates(ctx context.Context, works []openlibrary.TitleResult, suggestedBy string, trackedTitles, rejected, seen map[string]bool, out *[]DiscoverItem) {
+	for _, w := range works {
+		if len(*out) >= maxBookDiscoverResults {
+			return
+		}
+		if w.WorkKey == "" || rejected[w.WorkKey] || seen[w.WorkKey] {
+			continue
+		}
+		if trackedTitles[normalizeTitle(w.Title)] {
+			continue
+		}
+		seen[w.WorkKey] = true
+		*out = append(*out, DiscoverItem{
+			WorkKey:     w.WorkKey,
+			Title:       w.Title,
+			Authors:     strings.Join(w.Authors, ", "),
+			Year:        w.FirstYear,
+			CoverPath:   s.discoverCover(ctx, w.CoverID),
+			SuggestedBy: suggestedBy,
+		})
+	}
+}
+
+// discoverSubjects returns up to maxBookDiscoverSubjects distinct source-derived
+// subjects across the given seed book ids (OpenLibrary subjects persisted as
+// tags at scan time). An empty id list or a tag error yields no subjects — the
+// author heuristic alone still produces suggestions.
+func (s *Service) discoverSubjects(ctx context.Context, bookIDs []uint) []string {
+	if len(bookIDs) == 0 {
+		return nil
+	}
+	byID, err := tags.NewStore(s.db).ForMedia(ctx, tags.TypeBook, bookIDs)
+	if err != nil {
+		log.Printf("books: discover subjects lookup failed: %v", err)
+		return nil
+	}
+	subjects := make([]string, 0, maxBookDiscoverSubjects)
+	subjSeen := map[string]bool{}
+	for _, names := range byID {
+		for _, n := range names {
+			key := strings.ToLower(n)
+			if subjSeen[key] || len(subjects) >= maxBookDiscoverSubjects {
+				continue
+			}
+			subjSeen[key] = true
+			subjects = append(subjects, n)
+		}
+	}
+	return subjects
+}
+
+// discoverCover best-effort caches a suggestion's OpenLibrary cover through
+// internal/images and returns its relative path. The file is keyed by the cover
+// id ("book/olcover-<id>.jpg") so discover covers never collide with ISBN-keyed
+// covers of tracked books. A missing cover, nil image store, or failed download
+// yields "" (the UI shows a placeholder).
+func (s *Service) discoverCover(ctx context.Context, coverID int) string {
+	if s.images == nil || coverID == 0 {
+		return ""
+	}
+	url := s.metadata.CoverURL(coverID, "L")
+	if url == "" {
+		return ""
+	}
+	path, err := s.images.Fetch(ctx, s.httpClient, url, "book", "olcover-"+strconv.Itoa(coverID))
+	if err != nil {
+		log.Printf("books: discover cover download for %d failed: %v", coverID, err)
+		return ""
+	}
+	return path
+}
+
+// trackedBookTitleSet is the set of the user's tracked book titles, normalized,
+// for deduping suggestions (candidates are works, tracked books are ISBNs, so
+// title is the shared key).
+func (s *Service) trackedBookTitleSet(ctx context.Context, userID uint) (map[string]bool, error) {
+	var rows []struct{ Title string }
+	if err := s.db.WithContext(ctx).Model(&models.TrackingItem{}).
+		Where("user_id = ? AND type = ?", userID, TypeBook).
+		Select("title").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("books: load tracked titles: %w", err)
+	}
+	set := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		set[normalizeTitle(r.Title)] = true
+	}
+	return set, nil
+}
+
+// bookRejectedSet is the set of work keys the user has dismissed from book
+// Discover.
+func (s *Service) bookRejectedSet(ctx context.Context, userID uint) (map[string]bool, error) {
+	var rows []struct{ ExternalID string }
+	if err := s.db.WithContext(ctx).Model(&models.RejectedRec{}).
+		Where("user_id = ? AND type = ?", userID, TypeBook).
+		Select("external_id").Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("books: load rejected recs: %w", err)
+	}
+	set := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		set[r.ExternalID] = true
+	}
+	return set, nil
+}
+
+// RejectRec hides a book suggestion (by work key) so Discover will not surface
+// it again.
+func (s *Service) RejectRec(ctx context.Context, userID uint, workKey string) error {
+	workKey = strings.TrimSpace(workKey)
+	if workKey == "" {
+		return fmt.Errorf("%w: work key is required", ErrEmptyQuery)
+	}
+	rec := models.RejectedRec{UserID: userID, Type: TypeBook, ExternalID: workKey}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rec).Error; err != nil {
+		return fmt.Errorf("books: reject recommendation: %w", err)
+	}
+	return nil
+}
+
+// splitAuthors splits a comma-joined author string ("A, B") into trimmed,
+// non-empty names.
+func splitAuthors(joined string) []string {
+	parts := strings.Split(joined, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if name := strings.TrimSpace(p); name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// normalizeTitle lower-cases and trims a title for dedupe comparison, collapsing
+// internal whitespace so "The  Hobbit" and "The Hobbit" match.
+func normalizeTitle(title string) string {
+	return strings.Join(strings.Fields(strings.ToLower(title)), " ")
 }
 
 // validStatus reports whether status is allowed for the media type:

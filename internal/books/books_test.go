@@ -23,10 +23,12 @@ const (
 
 // fakeMetadata is a canned MetadataClient.
 type fakeMetadata struct {
-	books    map[string]*openlibrary.Book
-	titles   []openlibrary.TitleResult
-	editions map[string][]openlibrary.Edition
-	err      error
+	books     map[string]*openlibrary.Book
+	titles    []openlibrary.TitleResult
+	byAuthor  map[string][]openlibrary.TitleResult
+	bySubject map[string][]openlibrary.TitleResult
+	editions  map[string][]openlibrary.Edition
+	err       error
 }
 
 func (f *fakeMetadata) GetByISBN(_ context.Context, isbn string) (*openlibrary.Book, error) {
@@ -45,6 +47,20 @@ func (f *fakeMetadata) SearchByTitle(_ context.Context, _ string) ([]openlibrary
 		return nil, f.err
 	}
 	return f.titles, nil
+}
+
+func (f *fakeMetadata) SearchByAuthor(_ context.Context, authorName string) ([]openlibrary.TitleResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.byAuthor[authorName], nil
+}
+
+func (f *fakeMetadata) SearchBySubject(_ context.Context, subject string) ([]openlibrary.TitleResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.bySubject[subject], nil
 }
 
 func (f *fakeMetadata) ListEditions(_ context.Context, workKey string) ([]openlibrary.Edition, error) {
@@ -466,4 +482,66 @@ func TestListEditionsEmptyQuery(t *testing.T) {
 
 	_, err := svc.ListEditions(context.Background(), "")
 	require.ErrorIs(t, err, ErrEmptyQuery)
+}
+
+// Discover surfaces more works by the tracked book's author, caches their
+// covers, dedupes the already-tracked title, and tags each with its source.
+func TestDiscoverByAuthorDedupesTracked(t *testing.T) {
+	meta := &fakeMetadata{
+		books: map[string]*openlibrary.Book{testISBN: fullMeta()},
+		byAuthor: map[string][]openlibrary.TitleResult{
+			"Jane Doe": {
+				{WorkKey: "/works/OL1W", Title: "Networking Basics", Authors: []string{"Jane Doe"}}, // already tracked (same title)
+				{WorkKey: "/works/OL2W", Title: "Advanced Networking", Authors: []string{"Jane Doe"}, FirstYear: 2010, CoverID: 999},
+			},
+		},
+	}
+	imgs := &fakeImages{}
+	svc, _ := newTestService(t, meta, imgs)
+	ctx := context.Background()
+
+	book, err := svc.Scan(ctx, testISBN)
+	require.NoError(t, err)
+	_, err = svc.Track(ctx, 1, book.ID, StatusReading)
+	require.NoError(t, err)
+
+	items, err := svc.Discover(ctx, 1)
+	require.NoError(t, err)
+	require.Len(t, items, 1, "the already-tracked title is filtered out")
+	assert.Equal(t, "/works/OL2W", items[0].WorkKey)
+	assert.Equal(t, "Advanced Networking", items[0].Title)
+	assert.Equal(t, "books by Jane Doe", items[0].SuggestedBy)
+	// Cover is cached through internal/images, keyed by cover id (never hotlinked).
+	assert.Equal(t, "book/olcover-999.jpg", items[0].CoverPath)
+	assert.Equal(t, []string{"olcover-999"}, imgs.fetched)
+}
+
+// A rejected work is not surfaced again by Discover.
+func TestDiscoverExcludesRejectedBook(t *testing.T) {
+	meta := &fakeMetadata{
+		books: map[string]*openlibrary.Book{testISBN: fullMeta()},
+		byAuthor: map[string][]openlibrary.TitleResult{
+			"Jane Doe": {{WorkKey: "/works/OL2W", Title: "Advanced Networking", Authors: []string{"Jane Doe"}}},
+		},
+	}
+	svc, _ := newTestService(t, meta, &fakeImages{})
+	ctx := context.Background()
+
+	book, err := svc.Scan(ctx, testISBN)
+	require.NoError(t, err)
+	_, err = svc.Track(ctx, 1, book.ID, StatusReading)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.RejectRec(ctx, 1, "/works/OL2W"))
+	items, err := svc.Discover(ctx, 1)
+	require.NoError(t, err)
+	assert.Empty(t, items)
+}
+
+// With no tracked books there is nothing to seed from.
+func TestDiscoverNoSourcesBook(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{}, &fakeImages{})
+	items, err := svc.Discover(context.Background(), 1)
+	require.NoError(t, err)
+	assert.Empty(t, items)
 }

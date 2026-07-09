@@ -32,6 +32,8 @@ func RegisterBookRoutes(grp *gin.RouterGroup, svc *books.Service) {
 	grp.POST("/books/track", h.track)
 	grp.GET("/books/search", h.search)
 	grp.GET("/books/editions", h.editions)
+	grp.GET("/books/discover", h.discover)
+	grp.POST("/books/discover/reject", h.rejectRec)
 }
 
 // bookSearchResult is one work from an OpenLibrary title search. The workKey is
@@ -103,6 +105,48 @@ func (h *booksHandler) editions(c *gin.Context) {
 		}
 		c.JSON(http.StatusOK, gin.H{"editions": out})
 	}
+}
+
+// discover handles GET /api/books/discover — book suggestions via an
+// author/subject heuristic over the user's tracked books, each tagged with what
+// it was suggested from. Covers are pre-cached through internal/images;
+// coverPath is a relative /images path. workKey is the identity the client adds
+// (via the editions → scan → track flow).
+func (h *booksHandler) discover(c *gin.Context) {
+	items, err := h.svc.Discover(c.Request.Context(), CurrentUserID(c))
+	if err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading suggestions failed")
+		return
+	}
+	out := make([]gin.H, 0, len(items))
+	for _, it := range items {
+		out = append(out, gin.H{
+			"workKey":     it.WorkKey,
+			"title":       it.Title,
+			"authors":     it.Authors,
+			"year":        it.Year,
+			"coverPath":   it.CoverPath,
+			"suggestedBy": it.SuggestedBy,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+// rejectRec handles POST /api/books/discover/reject {workKey} — hide a
+// suggestion so it is not surfaced again.
+func (h *booksHandler) rejectRec(c *gin.Context) {
+	var body struct {
+		WorkKey string `json:"workKey"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.WorkKey) == "" {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "body must include a non-empty workKey")
+		return
+	}
+	if err := h.svc.RejectRec(c.Request.Context(), CurrentUserID(c), body.WorkKey); err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "could not reject suggestion")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 type scanRequest struct {

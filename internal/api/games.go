@@ -29,6 +29,8 @@ func RegisterGameRoutes(grp *gin.RouterGroup, svc *games.Service) {
 	grp.POST("/games/track", h.track)
 	grp.GET("/games/search", h.search)
 	grp.POST("/games/add", h.add)
+	grp.GET("/games/discover", h.discover)
+	grp.POST("/games/discover/reject", h.rejectRec)
 }
 
 type gameScanRequest struct {
@@ -191,4 +193,43 @@ func (h *gamesHandler) add(c *gin.Context) {
 			"item": toItemResponse(item),
 		})
 	}
+}
+
+// discover handles GET /api/games/discover — game suggestions via IGDB "similar
+// games" seeded from the user's tracked games, each tagged with the game it was
+// suggested from. Covers are pre-cached through internal/images; coverPath is a
+// relative /images path.
+func (h *gamesHandler) discover(c *gin.Context) {
+	items, err := h.svc.Discover(c.Request.Context(), CurrentUserID(c))
+	if err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading suggestions failed")
+		return
+	}
+	out := make([]gin.H, 0, len(items))
+	for _, it := range items {
+		out = append(out, gin.H{
+			"igdbId":      it.IGDBID,
+			"title":       it.Title,
+			"year":        it.Year,
+			"coverPath":   it.CoverPath,
+			"suggestedBy": it.SuggestedBy,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": out})
+}
+
+// rejectRec handles POST /api/games/discover/reject {igdbId} — hide a suggestion.
+func (h *gamesHandler) rejectRec(c *gin.Context) {
+	var body struct {
+		IGDBID int `json:"igdbId"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.IGDBID <= 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "body must include a positive igdbId")
+		return
+	}
+	if err := h.svc.RejectRec(c.Request.Context(), CurrentUserID(c), body.IGDBID); err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "could not reject suggestion")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

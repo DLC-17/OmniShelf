@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -258,6 +259,107 @@ func (c *Client) SearchGames(ctx context.Context, name string) ([]SearchResult, 
 		})
 	}
 	return results, nil
+}
+
+// SimilarGame is a lightweight IGDB "similar games" hit surfaced on the Discover
+// page. The id is the canonical IGDB identity a caller uses to add the game.
+type SimilarGame struct {
+	ID           int
+	Name         string
+	Year         int    // first release year; 0 when unknown
+	CoverImageID string // IGDB image_id; "" when no cover
+}
+
+// similarPayload models one /games entry expanded with its similar_games. IGDB
+// curates a similar_games list on every game; expanding its sub-fields lets one
+// request fan a set of seed ids out to their recommendations.
+type similarPayload struct {
+	ID           int `json:"id"`
+	SimilarGames []struct {
+		ID               int    `json:"id"`
+		Name             string `json:"name"`
+		FirstReleaseDate int64  `json:"first_release_date"`
+		Cover            struct {
+			ImageID string `json:"image_id"`
+		} `json:"cover"`
+	} `json:"similar_games"`
+}
+
+// SimilarGames fetches, for each seed IGDB game id, the "similar games" IGDB
+// curates for it. It returns a map from seed id to that game's similar games, so
+// a caller can tag each suggestion with the tracked game it came from. Seed ids
+// IGDB does not know (or that have no similar games) are simply absent from the
+// map. An unconfigured client yields ErrUnconfigured; an empty seed list yields
+// an empty map without a round-trip.
+func (c *Client) SimilarGames(ctx context.Context, seedIDs []int) (map[int][]SimilarGame, error) {
+	if !c.Configured() {
+		return nil, ErrUnconfigured
+	}
+	if len(seedIDs) == 0 {
+		return map[int][]SimilarGame{}, nil
+	}
+
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	body := fmt.Sprintf(
+		"fields similar_games.name,similar_games.first_release_date,similar_games.cover.image_id; where id = (%s); limit %d;",
+		joinInts(seedIDs), len(seedIDs),
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("igdb: build similar request: %w", err)
+	}
+	req.Header.Set("Client-ID", c.clientID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("igdb: request similar: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("igdb: similar returned status %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var payloads []similarPayload
+	if err := json.Unmarshal(raw, &payloads); err != nil {
+		return nil, fmt.Errorf("igdb: decode similar: %w", err)
+	}
+
+	out := make(map[int][]SimilarGame, len(payloads))
+	for _, p := range payloads {
+		similar := make([]SimilarGame, 0, len(p.SimilarGames))
+		for _, sg := range p.SimilarGames {
+			year := 0
+			if sg.FirstReleaseDate > 0 {
+				year = time.Unix(sg.FirstReleaseDate, 0).UTC().Year()
+			}
+			similar = append(similar, SimilarGame{
+				ID:           sg.ID,
+				Name:         sg.Name,
+				Year:         year,
+				CoverImageID: sg.Cover.ImageID,
+			})
+		}
+		out[p.ID] = similar
+	}
+	return out, nil
+}
+
+// joinInts renders ids as a comma-separated list for an Apicalypse
+// "where id = (...)" clause.
+func joinInts(ids []int) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.Itoa(id)
+	}
+	return strings.Join(parts, ",")
 }
 
 // names flattens a slice of IGDB named sub-entities to their non-empty names.

@@ -147,6 +147,21 @@ type RejectedRec struct {
 	CreatedAt  time.Time
 }
 
+// BookNote is one timestamped journal entry a user attaches to a book they
+// track. Notes are per-user (never shared metadata): they are scoped by UserID
+// and reference the user's book TrackingItem via ItemID. A book can carry many
+// notes; deleting the tracking item leaves its notes orphaned only if untrack
+// does not prune them (handlers do). This model is deliberately source-agnostic
+// so imported Goodreads reviews (#2) can be inserted as ordinary entries.
+type BookNote struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"not null;index:idx_note_user_item"`
+	ItemID    uint   `gorm:"not null;index:idx_note_user_item"` // the book's TrackingItem.ID
+	Body      string `gorm:"not null"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // ImportJob tracks a TV Time CSV import.
 type ImportJob struct {
 	ID         uint   `gorm:"primaryKey"`
@@ -186,5 +201,6 @@ func All() []any {
 		&ShowAlias{},
 		&Tag{},
 		&MediaTag{},
+		&BookNote{},
 	}
 }

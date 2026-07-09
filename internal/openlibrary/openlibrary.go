@@ -218,11 +218,30 @@ type searchResponse struct {
 // transport/decode failure is an error; an empty result set yields an empty
 // slice. Callers list a work's editions (ListEditions) to choose an ISBN.
 func (c *Client) SearchByTitle(ctx context.Context, title string) ([]TitleResult, error) {
-	q := url.Values{
-		"title":  {title},
-		"fields": {"key,title,author_name,first_publish_year,cover_i,edition_count"},
-		"limit":  {"20"},
-	}
+	return c.searchWorks(ctx, url.Values{"title": {title}})
+}
+
+// SearchByAuthor returns up to 20 works by the given author name, for the
+// author-based Discover heuristic ("more books by authors you read"). Only a
+// transport/decode failure is an error; no matches yields an empty slice.
+func (c *Client) SearchByAuthor(ctx context.Context, authorName string) ([]TitleResult, error) {
+	return c.searchWorks(ctx, url.Values{"author": {authorName}})
+}
+
+// SearchBySubject returns up to 20 works tagged with the given OpenLibrary
+// subject, for the subject-based Discover heuristic ("more in subjects you
+// read"). Only a transport/decode failure is an error; no matches yields an
+// empty slice.
+func (c *Client) SearchBySubject(ctx context.Context, subject string) ([]TitleResult, error) {
+	return c.searchWorks(ctx, url.Values{"subject": {subject}})
+}
+
+// searchWorks runs a /search.json query with the given selector (title, author
+// or subject) and maps the docs to TitleResults. The fields and limit are shared
+// so title/author/subject searches differ only in their selector parameter.
+func (c *Client) searchWorks(ctx context.Context, q url.Values) ([]TitleResult, error) {
+	q.Set("fields", "key,title,author_name,first_publish_year,cover_i,edition_count")
+	q.Set("limit", "20")
 	var resp searchResponse
 	if err := c.getJSON(ctx, "/search.json?"+q.Encode(), &resp); err != nil {
 		return nil, err
