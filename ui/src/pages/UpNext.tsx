@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ApiError } from '../api/client'
 import type { UpNextFilter } from '../api/tv'
 import UpNextCard from '../components/tv/UpNextCard'
+import UpcomingReleases from '../components/tv/UpcomingReleases'
 import { useMarkWatched, useUpNext } from '../hooks/useUpNext'
 
 const TABS: { value: UpNextFilter; label: string }[] = [
@@ -78,7 +79,8 @@ export default function UpNext() {
       )}
 
       <hr />
-      
+
+      <UpcomingReleases />
     </section>
   )
 }

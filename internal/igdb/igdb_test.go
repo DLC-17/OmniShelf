@@ -45,7 +45,8 @@ func newClient(t *testing.T, ts *testServer) *Client {
 }
 
 func TestGetGame(t *testing.T) {
-	ts := &testServer{gameBody: `[{"id":7346,"name":"The Legend of Zelda: Breath of the Wild","summary":"An open-world adventure.","cover":{"image_id":"co3p2d"}}]`}
+	// first_release_date 1488499200 = 2017-03-03 UTC.
+	ts := &testServer{gameBody: `[{"id":7346,"name":"The Legend of Zelda: Breath of the Wild","summary":"An open-world adventure.","first_release_date":1488499200,"cover":{"image_id":"co3p2d"},"genres":[{"name":"Adventure"},{"name":"Role-playing (RPG)"}],"keywords":[{"name":"open world"}]}]`}
 	c := newClient(t, ts)
 
 	game, err := c.GetGame(context.Background(), 7346)
@@ -55,6 +56,22 @@ func TestGetGame(t *testing.T) {
 	assert.Equal(t, "The Legend of Zelda: Breath of the Wild", game.Name)
 	assert.Equal(t, "An open-world adventure.", game.Summary)
 	assert.Equal(t, "co3p2d", game.CoverImageID)
+	assert.Equal(t, "2017-03-03", game.ReleaseDate)
+	assert.Equal(t, []string{"Adventure", "Role-playing (RPG)"}, game.Genres)
+	assert.Equal(t, []string{"open world"}, game.Keywords)
+	// Tags flattens genres followed by keywords for tag persistence.
+	assert.Equal(t, []string{"Adventure", "Role-playing (RPG)", "open world"}, game.Tags())
+}
+
+// A game with no first_release_date leaves ReleaseDate empty (not epoch zero).
+func TestGetGameNoReleaseDate(t *testing.T) {
+	ts := &testServer{gameBody: `[{"id":42,"name":"Unannounced","cover":{"image_id":"x"}}]`}
+	c := newClient(t, ts)
+
+	game, err := c.GetGame(context.Background(), 42)
+	require.NoError(t, err)
+	require.NotNil(t, game)
+	assert.Equal(t, "", game.ReleaseDate)
 }
 
 // The token is fetched once and reused across calls.
@@ -77,6 +94,28 @@ func TestGetGameEmpty(t *testing.T) {
 	game, err := c.GetGame(context.Background(), 999)
 	require.NoError(t, err)
 	assert.Nil(t, game)
+}
+
+func TestSearchGames(t *testing.T) {
+	// The stub /games handler echoes gameBody for both GetGame and SearchGames.
+	ts := &testServer{gameBody: `[{"id":7346,"name":"Zelda","first_release_date":1488499200,"cover":{"image_id":"co3p2d"}},{"id":1234,"name":"Zelda II"}]`}
+	c := newClient(t, ts)
+
+	results, err := c.SearchGames(context.Background(), "zelda")
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, 7346, results[0].ID)
+	assert.Equal(t, "Zelda", results[0].Name)
+	assert.Equal(t, 2017, results[0].Year)
+	assert.Equal(t, "co3p2d", results[0].CoverImageID)
+	// No first_release_date → year 0.
+	assert.Equal(t, 0, results[1].Year)
+}
+
+func TestSearchGamesUnconfigured(t *testing.T) {
+	c := New("", "")
+	_, err := c.SearchGames(context.Background(), "zelda")
+	require.ErrorIs(t, err, ErrUnconfigured)
 }
 
 func TestCoverURL(t *testing.T) {

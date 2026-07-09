@@ -712,6 +712,21 @@ button:disabled {
   gap: 1.1rem;
   align-items: flex-start;
 }
+.cover-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.cover-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.cover-actions button {
+  font-size: 0.82rem;
+  padding: 0.3rem 0.5rem;
+}
 .detail-rating {
   display: flex;
   align-items: center;
@@ -728,6 +743,13 @@ button:disabled {
 }
 .detail-actions {
   margin-top: 1.25rem;
+}
+/* Source-derived tag chips (TMDB/IGDB/OpenLibrary keywords). */
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
 }
 
 /* ---------- Poster ---------- */

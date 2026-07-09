@@ -44,6 +44,7 @@ type itemResponse struct {
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
 	Platform    string    `json:"platform"`
+	Tags        []string  `json:"tags"` // source-derived tags/keywords; [] when none
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
@@ -56,6 +57,7 @@ func toItemResponse(item *models.TrackingItem) itemResponse {
 		Status:     item.Status,
 		Progress:   item.Progress,
 		Rating:     item.Rating,
+		Tags:       []string{}, // never null; overwritten with the real set for library rows
 		UpdatedAt:  item.UpdatedAt,
 	}
 }
@@ -68,6 +70,9 @@ func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r.PageCount = e.PageCount
 	r.Description = e.Description
 	r.Platform = e.Platform
+	if e.Tags != nil {
+		r.Tags = e.Tags
+	}
 	return r
 }
 

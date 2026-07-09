@@ -69,6 +69,30 @@ func (s *Store) Fetch(ctx context.Context, httpClient *http.Client, url, kind, e
 		return "", fmt.Errorf("images: download %s: non-image content-type %q", url, ct)
 	}
 
+	return s.writeAtomic(dir, relPath, externalID, resp.Body)
+}
+
+// Save writes the bytes read from r to {root}/{kind}/{externalID}.jpg,
+// overwriting any existing cached artwork, and returns the relative path
+// "{kind}/{externalID}.jpg". It is the direct-bytes counterpart to Fetch, used
+// for user-uploaded cover art (the caller is responsible for validating that
+// the bytes are actually an image). Path components are sanitized the same way.
+func (s *Store) Save(r io.Reader, kind, externalID string) (string, error) {
+	if !safePathComponent(kind) || !safePathComponent(externalID) {
+		return "", fmt.Errorf("images: unsafe path component kind=%q externalID=%q", kind, externalID)
+	}
+	relPath := filepath.ToSlash(filepath.Join(kind, externalID+".jpg"))
+	dir := filepath.Join(s.rootDir, kind)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", fmt.Errorf("images: create dir %s: %w", dir, err)
+	}
+	return s.writeAtomic(dir, relPath, externalID, r)
+}
+
+// writeAtomic streams r to a temp file in dir and renames it over
+// {dir}/{externalID}.jpg, so a partial write never replaces a good file. Any
+// failure removes the temp file. relPath is only used for error context.
+func (s *Store) writeAtomic(dir, relPath, externalID string, r io.Reader) (string, error) {
 	// Temp file in the destination directory so the final rename is atomic
 	// (same filesystem).
 	tmp, err := os.CreateTemp(dir, externalID+".*.tmp")
@@ -76,13 +100,10 @@ func (s *Store) Fetch(ctx context.Context, httpClient *http.Client, url, kind, e
 		return "", fmt.Errorf("images: create temp file: %w", err)
 	}
 	tmpName := tmp.Name()
-	cleanup := func() {
+
+	if _, err := io.Copy(tmp, r); err != nil {
 		tmp.Close()
 		os.Remove(tmpName)
-	}
-
-	if _, err := io.Copy(tmp, resp.Body); err != nil {
-		cleanup()
 		return "", fmt.Errorf("images: write %s: %w", relPath, err)
 	}
 	if err := tmp.Close(); err != nil {
@@ -92,7 +113,7 @@ func (s *Store) Fetch(ctx context.Context, httpClient *http.Client, url, kind, e
 
 	dest := filepath.Join(dir, externalID+".jpg")
 	// Windows os.Rename fails if the destination exists; remove any stale
-	// cached copy first so re-fetches (nightly artwork retry) succeed.
+	// cached copy first so re-writes (nightly retry, refresh, upload) succeed.
 	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
 		os.Remove(tmpName)
 		return "", fmt.Errorf("images: replace %s: %w", relPath, err)

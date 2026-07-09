@@ -81,6 +81,20 @@ func newTMDBServer(t *testing.T) *httptest.Server {
 			},
 		})
 	})
+	// Movies: "Inception" (27205) is searchable; "Schindler's List" (424) only
+	// resolves by id via a manual mapping (search returns nothing for it).
+	mux.HandleFunc("/search/movie", func(w http.ResponseWriter, r *http.Request) {
+		q := strings.ToLower(r.URL.Query().Get("query"))
+		resp := tmdb.MovieSearchResponse{Page: 1}
+		if strings.Contains(q, "inception") {
+			resp.Results = []tmdb.MovieResult{{ID: 27205, Title: "Inception", ReleaseDate: "2010-07-16"}}
+			resp.TotalResults = 1
+		}
+		writeJSON(w, resp)
+	})
+	mux.HandleFunc("/movie/424", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, tmdb.Movie{ID: 424, Title: "Schindler's List", Status: "Released", ReleaseDate: "1993-12-15"})
+	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	return srv
@@ -500,6 +514,55 @@ func TestSeenExportAddsSeriesAndWatches(t *testing.T) {
 	var watch models.EpisodeWatch
 	require.NoError(t, e.db.Order("id").First(&watch).Error)
 	assert.Equal(t, 2008, watch.WatchedAt.Year())
+}
+
+// TestTrackingExportImportsMovies imports TV Time's unified tracking export:
+// movie watch records (a populated movie_name column) become COMPLETED MOVIE
+// tracking items matched by name, duplicate movie rows are deduped, an episode
+// record in the same file still imports its watch, an aggregate count-* row is
+// skipped, and a movie TMDB can't match lands in the unresolved bucket — where
+// manual resolution maps it to a TMDB movie (not a show).
+func TestTrackingExportImportsMovies(t *testing.T) {
+	e := newEnv(t)
+	jobID := e.startImport(t, map[string][]byte{
+		"tvtime_tracking_export.csv": fixture(t, "tvtime_tracking_export.csv"),
+	})
+	jr := e.waitForJob(t, jobID)
+
+	assert.Equal(t, importer.StatusDone, jr.Status)
+	assert.Equal(t, 5, jr.Total)
+	assert.Equal(t, 5, jr.Processed)
+	assert.Equal(t, 1, jr.Skipped, "the aggregate count-watch-movie row is skipped")
+	assert.Equal(t, []string{"Totally Unknown Film 9x"}, jr.Unresolved)
+
+	// Inception resolved once (the duplicate row is a no-op) as a COMPLETED movie.
+	assert.EqualValues(t, 1, count[models.Movie](t, e.db))
+	assert.EqualValues(t, 1, count[models.TrackingItem](t, e.db, "user_id = ? AND type = ?", 1, "MOVIE"))
+	var inception models.TrackingItem
+	require.NoError(t, e.db.Where("type = ? AND external_id = ?", "MOVIE", "27205").First(&inception).Error)
+	assert.Equal(t, "Inception", inception.Title)
+	assert.Equal(t, "COMPLETED", inception.Status)
+
+	// The episode record in the same file still imported its show + watch.
+	assert.EqualValues(t, 1, count[models.TrackingItem](t, e.db, "type = ? AND external_id = ?", "TV", "1396"))
+	assert.EqualValues(t, 1, count[models.EpisodeWatch](t, e.db, "user_id = ?", 1))
+
+	// Manual resolution maps the unmatched movie to a TMDB movie id (424), which
+	// creates a Movie + MOVIE tracking item — never a show.
+	body, err := json.Marshal(map[string]any{"mappings": map[string]int{"Totally Unknown Film 9x": 424}})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/tv/import/%d/resolve", jobID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := e.do(t, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var resolved jobResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resolved))
+	assert.Empty(t, resolved.Unresolved)
+
+	assert.EqualValues(t, 2, count[models.Movie](t, e.db))
+	assert.EqualValues(t, 2, count[models.TrackingItem](t, e.db, "user_id = ? AND type = ?", 1, "MOVIE"))
+	assert.EqualValues(t, 1, count[models.Show](t, e.db), "resolving a movie must not create a show")
+	assert.EqualValues(t, 1, count[models.TrackingItem](t, e.db, "type = ? AND external_id = ?", "MOVIE", "424"))
 }
 
 // TestImportIsDBFirstViaAlias proves the pipeline is DB-first: with a cached

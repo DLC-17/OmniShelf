@@ -14,6 +14,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
+	"github.com/davidlc1229/omnishelf/internal/tags"
 )
 
 const testBarcode = "045496590420"
@@ -58,8 +59,9 @@ func fullGame() *scandex.Game {
 
 // fakeEnricher is a canned IGDB Enricher.
 type fakeEnricher struct {
-	games map[int]*igdb.Game
-	err   error
+	games         map[int]*igdb.Game
+	searchResults []igdb.SearchResult
+	err           error
 }
 
 func (f *fakeEnricher) GetGame(_ context.Context, id int) (*igdb.Game, error) {
@@ -67,6 +69,13 @@ func (f *fakeEnricher) GetGame(_ context.Context, id int) (*igdb.Game, error) {
 		return nil, f.err
 	}
 	return f.games[id], nil // nil map miss → (nil, nil), a valid "no metadata"
+}
+
+func (f *fakeEnricher) SearchGames(_ context.Context, _ string) ([]igdb.SearchResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.searchResults, nil
 }
 
 func (f *fakeEnricher) CoverURL(imageID, _ string) string {
@@ -134,7 +143,7 @@ func TestScanDBFirst(t *testing.T) {
 func TestScanEnrichesFromIGDB(t *testing.T) {
 	meta := &fakeMetadata{games: map[string]*scandex.Game{testBarcode: fullGame()}}
 	enr := &fakeEnricher{games: map[int]*igdb.Game{
-		7346: {ID: 7346, Name: "Zelda", Summary: "An open-world adventure.", CoverImageID: "co3p2d"},
+		7346: {ID: 7346, Name: "Zelda", Summary: "An open-world adventure.", CoverImageID: "co3p2d", ReleaseDate: "2017-03-03"},
 	}}
 	imgs := &fakeImages{}
 	svc, _ := newEnrichedService(t, meta, enr, imgs)
@@ -142,8 +151,30 @@ func TestScanEnrichesFromIGDB(t *testing.T) {
 	game, err := svc.Scan(context.Background(), testBarcode)
 	require.NoError(t, err)
 	assert.Equal(t, "An open-world adventure.", game.Description)
+	assert.Equal(t, "2017-03-03", game.ReleaseDate)
 	assert.Equal(t, "game/"+testBarcode+".jpg", game.CoverPath)
 	assert.Equal(t, []string{testBarcode}, imgs.fetched)
+}
+
+// IGDB genres + keywords are persisted as source-derived tags on the game row.
+func TestScanPersistsIGDBTags(t *testing.T) {
+	meta := &fakeMetadata{games: map[string]*scandex.Game{testBarcode: fullGame()}}
+	enr := &fakeEnricher{games: map[int]*igdb.Game{
+		7346: {
+			ID:       7346,
+			Name:     "Zelda",
+			Genres:   []string{"Adventure", "Role-playing (RPG)"},
+			Keywords: []string{"open world"},
+		},
+	}}
+	svc, gdb := newEnrichedService(t, meta, enr, &fakeImages{})
+
+	game, err := svc.Scan(context.Background(), testBarcode)
+	require.NoError(t, err)
+
+	got, err := tags.NewStore(gdb).ForMedia(context.Background(), tags.TypeGame, []uint{game.ID})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Adventure", "open world", "Role-playing (RPG)"}, got[game.ID])
 }
 
 // A failing IGDB lookup must not fail the scan — the game is still saved.
@@ -192,7 +223,8 @@ func TestTrackHappyPath(t *testing.T) {
 	item, err := svc.Track(context.Background(), 1, game.ID, StatusPlaying)
 	require.NoError(t, err)
 	assert.Equal(t, TypeGame, item.Type)
-	assert.Equal(t, testBarcode, item.ExternalID)
+	// GAME tracking items are keyed by the canonical IGDB id, not the barcode.
+	assert.Equal(t, "7346", item.ExternalID)
 	assert.Equal(t, StatusPlaying, item.Status)
 }
 
@@ -223,4 +255,85 @@ func TestTrackAlreadyTracked(t *testing.T) {
 	existing, err := svc.Track(context.Background(), 1, game.ID, StatusPlaying)
 	require.ErrorIs(t, err, ErrAlreadyTracked)
 	require.NotNil(t, existing)
+}
+
+// Search delegates to the IGDB enricher and returns its candidates.
+func TestSearchDelegatesToIGDB(t *testing.T) {
+	enr := &fakeEnricher{searchResults: []igdb.SearchResult{{ID: 7346, Name: "Zelda", Year: 2017}}}
+	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, &fakeImages{})
+
+	res, err := svc.Search(context.Background(), "zelda")
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, 7346, res[0].ID)
+}
+
+// A blank query never reaches IGDB.
+func TestSearchEmptyQuery(t *testing.T) {
+	enr := &fakeEnricher{}
+	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, &fakeImages{})
+
+	_, err := svc.Search(context.Background(), "   ")
+	require.ErrorIs(t, err, ErrEmptyQuery)
+}
+
+// Without an enricher (no IGDB credentials) search is unavailable.
+func TestSearchUnavailableWithoutEnricher(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{})
+
+	_, err := svc.Search(context.Background(), "zelda")
+	require.ErrorIs(t, err, ErrSearchUnavailable)
+}
+
+// AddByIGDB creates a barcode-less game keyed by its IGDB id and a PLAN_TO item.
+func TestAddByIGDBCreatesBarcodelessGame(t *testing.T) {
+	enr := &fakeEnricher{games: map[int]*igdb.Game{
+		7346: {ID: 7346, Name: "Zelda", Summary: "An open-world adventure.", CoverImageID: "co3p2d"},
+	}}
+	imgs := &fakeImages{}
+	svc, gdb := newEnrichedService(t, &fakeMetadata{}, enr, imgs)
+
+	game, item, err := svc.AddByIGDB(context.Background(), 1, 7346, "")
+	require.NoError(t, err)
+	assert.Equal(t, 7346, game.IGDBID)
+	assert.Equal(t, "", game.Barcode)
+	assert.Equal(t, "Zelda", game.Title)
+	assert.Equal(t, "game/igdb-7346.jpg", game.CoverPath)
+	assert.Equal(t, StatusPlanTo, item.Status)
+	assert.Equal(t, "7346", item.ExternalID)
+
+	var count int64
+	require.NoError(t, gdb.Model(&models.Game{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+// A game scanned by barcode and later added by name share one cache row, keyed
+// by IGDB id (DB-first, no duplicate).
+func TestAddByIGDBReusesScannedRow(t *testing.T) {
+	meta := &fakeMetadata{games: map[string]*scandex.Game{testBarcode: fullGame()}}
+	enr := &fakeEnricher{games: map[int]*igdb.Game{7346: {ID: 7346, Name: "Zelda"}}}
+	svc, gdb := newEnrichedService(t, meta, enr, &fakeImages{})
+
+	scanned, err := svc.Scan(context.Background(), testBarcode)
+	require.NoError(t, err)
+
+	game, _, err := svc.AddByIGDB(context.Background(), 1, 7346, StatusPlaying)
+	require.NoError(t, err)
+	assert.Equal(t, scanned.ID, game.ID)
+
+	var count int64
+	require.NoError(t, gdb.Model(&models.Game{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count)
+}
+
+// Adding the same game by name twice reports ErrAlreadyTracked with the item.
+func TestAddByIGDBAlreadyTracked(t *testing.T) {
+	enr := &fakeEnricher{games: map[int]*igdb.Game{7346: {ID: 7346, Name: "Zelda"}}}
+	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, &fakeImages{})
+
+	_, _, err := svc.AddByIGDB(context.Background(), 1, 7346, StatusPlaying)
+	require.NoError(t, err)
+	_, item, err := svc.AddByIGDB(context.Background(), 1, 7346, StatusPlaying)
+	require.ErrorIs(t, err, ErrAlreadyTracked)
+	require.NotNil(t, item)
 }

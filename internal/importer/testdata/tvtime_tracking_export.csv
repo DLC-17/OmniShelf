@@ -1,0 +1,6 @@
+watch_count,type-uuid-n,uuid,created_at,updated_at,series_id,type,user_id,series_name,watches,alpha_range_key,entity_type,movie_name,follow_date_range_key,release_date_range_key,release_date,runtime,rewatch_count,episode_id,season_number,episode_number,watch_date,series_uuid,total_series_runtime,total_movies_runtime,unitarian,watched_episode_range_key,country,bulk_type,watch_date_range_key
+327,count-watch-movie,,,,,,15442696,,[a1b2c3d4 e5f6a7b8],,,,,,,,,,,,,,,,,,,,
+1,watch-movie-uuid1,,,,,watch-movie,15442696,,,,movie,Inception,,,2010-07-16,,,,,,,,,,,,,,
+1,watch-movie-uuid2,,,,,watch-movie,15442696,,,,movie,Inception,,,2010-07-16,,,,,,,,,,,,,,
+1,watch-movie-uuid3,,,,,watch-movie,15442696,,,,movie,Totally Unknown Film 9x,,,1999-05-05,,,,,,,,,,,,,,
+1,watch-episode-uuid4,,2015-05-05 12:00:00,,,watch-episode,15442696,Breaking Bad,,,episode,,,,,,,,1,1,2015-05-05,,,,,,,,

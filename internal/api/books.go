@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -29,6 +30,79 @@ func RegisterBookRoutes(grp *gin.RouterGroup, svc *books.Service) {
 	h := &booksHandler{svc: svc}
 	grp.POST("/books/scan", h.scan)
 	grp.POST("/books/track", h.track)
+	grp.GET("/books/search", h.search)
+	grp.GET("/books/editions", h.editions)
+}
+
+// bookSearchResult is one work from an OpenLibrary title search. The workKey is
+// used to list editions; the client then adds a chosen edition's ISBN via the
+// existing /books/scan + /books/track path.
+type bookSearchResult struct {
+	WorkKey      string `json:"workKey"`
+	Title        string `json:"title"`
+	Authors      string `json:"authors"` // comma-joined
+	FirstYear    int    `json:"firstYear"`
+	EditionCount int    `json:"editionCount"`
+}
+
+// bookEdition is one ISBN-bearing edition offered in the edition picker.
+type bookEdition struct {
+	ISBN13      string `json:"isbn13"`
+	Title       string `json:"title"`
+	PublishDate string `json:"publishDate"`
+}
+
+// search handles GET /api/books/search?q= — an OpenLibrary title-search proxy.
+func (h *booksHandler) search(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "query parameter q is required")
+		return
+	}
+
+	results, err := h.svc.SearchTitle(c.Request.Context(), q)
+	switch {
+	case errors.Is(err, books.ErrUpstream):
+		Error(c, http.StatusBadGateway, CodeUpstreamError, "OpenLibrary is unreachable, try again")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "search failed")
+	default:
+		out := make([]bookSearchResult, 0, len(results))
+		for _, r := range results {
+			out = append(out, bookSearchResult{
+				WorkKey:      r.WorkKey,
+				Title:        r.Title,
+				Authors:      strings.Join(r.Authors, ", "),
+				FirstYear:    r.FirstYear,
+				EditionCount: r.EditionCount,
+			})
+		}
+		c.JSON(http.StatusOK, gin.H{"results": out})
+	}
+}
+
+// editions handles GET /api/books/editions?workKey= — the ISBN picker for a
+// title-search work.
+func (h *booksHandler) editions(c *gin.Context) {
+	workKey := strings.TrimSpace(c.Query("workKey"))
+	if workKey == "" {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "query parameter workKey is required")
+		return
+	}
+
+	editions, err := h.svc.ListEditions(c.Request.Context(), workKey)
+	switch {
+	case errors.Is(err, books.ErrUpstream):
+		Error(c, http.StatusBadGateway, CodeUpstreamError, "OpenLibrary is unreachable, try again")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading editions failed")
+	default:
+		out := make([]bookEdition, 0, len(editions))
+		for _, e := range editions {
+			out = append(out, bookEdition{ISBN13: e.ISBN13, Title: e.Title, PublishDate: e.PublishDate})
+		}
+		c.JSON(http.StatusOK, gin.H{"editions": out})
+	}
 }
 
 type scanRequest struct {

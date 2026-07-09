@@ -77,8 +77,9 @@ func TestSearchMovie(t *testing.T) {
 func TestGetMovie(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/movie/27205", r.URL.Path)
+		assert.Equal(t, "keywords", r.URL.Query().Get("append_to_response"))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":27205,"title":"Inception","overview":"A thief.","status":"Released","release_date":"2010-07-15","poster_path":"/x.jpg"}`))
+		w.Write([]byte(`{"id":27205,"title":"Inception","overview":"A thief.","status":"Released","release_date":"2010-07-15","poster_path":"/x.jpg","keywords":{"keywords":[{"id":1,"name":"dream"},{"id":2,"name":"heist"}]}}`))
 	}))
 	defer srv.Close()
 
@@ -88,6 +89,7 @@ func TestGetMovie(t *testing.T) {
 	assert.Equal(t, "Inception", m.Title)
 	assert.Equal(t, "Released", m.Status)
 	assert.Equal(t, "/x.jpg", m.PosterPath)
+	assert.Equal(t, []string{"dream", "heist"}, m.TagNames())
 }
 
 func TestMovieRecommendations(t *testing.T) {
@@ -103,6 +105,22 @@ func TestMovieRecommendations(t *testing.T) {
 	require.Len(t, res.Results, 1)
 	assert.Equal(t, 348350, res.Results[0].ID)
 	assert.Equal(t, "Solo", res.Results[0].Title)
+}
+
+// TV keywords arrive under keywords.results (movies use keywords.keywords);
+// GetShow requests them via append_to_response and TagNames flattens them.
+func TestGetShowKeywords(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/tv/1399", r.URL.Path)
+		assert.Equal(t, "keywords", r.URL.Query().Get("append_to_response"))
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":1399,"name":"Game of Thrones","status":"Ended","keywords":{"results":[{"id":1,"name":"dragon"},{"id":2,"name":"based on novel or book"}]}}`))
+	}))
+	defer srv.Close()
+
+	show, err := newTestClient(srv).GetShow(context.Background(), 1399)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"dragon", "based on novel or book"}, show.TagNames())
 }
 
 func TestGetShow(t *testing.T) {

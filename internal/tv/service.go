@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/davidlc1229/omnishelf/internal/models"
+	"github.com/davidlc1229/omnishelf/internal/tags"
 	"github.com/davidlc1229/omnishelf/internal/tmdb"
 )
 
@@ -220,6 +221,14 @@ func (s *Service) AddShow(ctx context.Context, userID uint, tmdbID int) (*AddRes
 	})
 	if err != nil {
 		return nil, fmt.Errorf("tv: persist show %d: %w", tmdbID, err)
+	}
+
+	// Persist the show's source-derived tags (TMDB keywords). Best-effort: a
+	// tag failure must never fail the add — the show is already cached.
+	if names := detail.TagNames(); len(names) > 0 {
+		if err := tags.NewStore(s.db).Set(ctx, tags.TypeTV, show.ID, names); err != nil {
+			log.Printf("tv: persisting tags for show %d failed: %v", tmdbID, err)
+		}
 	}
 
 	// Create the tracking link before spending time on the poster download.

@@ -37,6 +37,13 @@ var (
 	isbnHeaders   = []string{"isbn"}
 	shelfHeaders  = []string{"exclusive_shelf", "bookshelves", "shelf"}
 	pagesHeaders  = []string{"number_of_pages", "pages", "page_count", "num_pages"}
+
+	// TV Time's unified tracking export carries movie watch records alongside
+	// series/episode records in one file. A movie row is the one with a
+	// populated movie-name column; the release-date column disambiguates the
+	// TMDB match when a title is ambiguous.
+	movieNameHeaders   = []string{"movie_name", "movie_title", "film_name"}
+	releaseDateHeaders = []string{"release_date"}
 )
 
 // fileKind classifies a recognized CSV.
@@ -74,7 +81,10 @@ type parsedFile struct {
 	isbnIdx   int
 	shelfIdx  int
 	pagesIdx  int
-	records   [][]string
+	// Movie column indices for TV Time's unified export; -1 when absent.
+	movieNameIdx   int
+	releaseDateIdx int
+	records        [][]string
 }
 
 // Payload is a fully classified upload ready for background processing.
@@ -185,6 +195,7 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 	pf := &parsedFile{
 		name: f.Name, titleIdx: -1, watchedIdx: -1,
 		authorIdx: -1, isbn13Idx: -1, isbnIdx: -1, shelfIdx: -1, pagesIdx: -1,
+		movieNameIdx: -1, releaseDateIdx: -1,
 	}
 	for i, h := range header {
 		switch n := normalizeHeader(h); {
@@ -206,6 +217,10 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 			pf.shelfIdx = i
 		case pf.pagesIdx < 0 && matchesHeader(n, pagesHeaders):
 			pf.pagesIdx = i
+		case pf.movieNameIdx < 0 && matchesHeader(n, movieNameHeaders):
+			pf.movieNameIdx = i
+		case pf.releaseDateIdx < 0 && matchesHeader(n, releaseDateHeaders):
+			pf.releaseDateIdx = i
 		}
 	}
 
@@ -214,6 +229,10 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 		// A title alongside an ISBN column is a Goodreads (book) export.
 		pf.kind = kindGoodreads
 	case pf.titleIdx >= 0 && len(pf.seasonIdxs) > 0 && len(pf.episodeIdxs) > 0:
+		pf.kind = kindSeen
+	case pf.movieNameIdx >= 0:
+		// A movie-name column with no season/episode pair: a movies-only export.
+		// Handled by the seen path, whose per-row movie routing does the work.
 		pf.kind = kindSeen
 	case pf.titleIdx >= 0:
 		pf.kind = kindFollowed

@@ -15,6 +15,7 @@ import (
 
 	omnishelf "github.com/davidlc1229/omnishelf"
 	"github.com/davidlc1229/omnishelf/internal/api"
+	"github.com/davidlc1229/omnishelf/internal/artwork"
 	"github.com/davidlc1229/omnishelf/internal/books"
 	"github.com/davidlc1229/omnishelf/internal/config"
 	"github.com/davidlc1229/omnishelf/internal/db"
@@ -110,7 +111,11 @@ func runServer() error {
 	imp := importer.New(importer.Config{DB: gdb, TMDB: tmdbClient, Images: imageStore})
 	api.RegisterImportRoutes(protected, imp)
 
+	artworkSvc := artwork.New(gdb, tmdbClient, igdbClient, olClient, imageStore)
+	api.RegisterArtworkRoutes(protected, artworkSvc)
+
 	api.RegisterFeedRoutes(protected, gdb)
+	api.RegisterUpcomingRoutes(protected, gdb)
 	api.RegisterUserRoutes(protected, gdb)
 
 	// Nightly TMDB sync at 03:00.

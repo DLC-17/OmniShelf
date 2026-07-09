@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -15,7 +16,7 @@ const (
 	CodeGameNotFound = "game_not_found"
 )
 
-// gamesHandler serves POST /api/games/scan and /api/games/track.
+// gamesHandler serves the game scan/track and name-search/add endpoints.
 type gamesHandler struct {
 	svc *games.Service
 }
@@ -26,6 +27,8 @@ func RegisterGameRoutes(grp *gin.RouterGroup, svc *games.Service) {
 	h := &gamesHandler{svc: svc}
 	grp.POST("/games/scan", h.scan)
 	grp.POST("/games/track", h.track)
+	grp.GET("/games/search", h.search)
+	grp.POST("/games/add", h.add)
 }
 
 type gameScanRequest struct {
@@ -35,6 +38,19 @@ type gameScanRequest struct {
 type gameTrackRequest struct {
 	GameID uint   `json:"gameId"`
 	Status string `json:"status"`
+}
+
+type gameAddRequest struct {
+	IGDBID int    `json:"igdbId"`
+	Status string `json:"status"`
+}
+
+// gameSearchResult is one IGDB name-search hit. The igdbId is the canonical
+// identity the client posts back to /api/games/add.
+type gameSearchResult struct {
+	IGDBID int    `json:"igdbId"`
+	Name   string `json:"name"`
+	Year   int    `json:"year"`
 }
 
 // gameResponse is the JSON shape of a Game payload.
@@ -112,5 +128,67 @@ func (h *gamesHandler) track(c *gin.Context) {
 		Error(c, http.StatusInternalServerError, CodeInternal, "tracking failed")
 	default:
 		c.JSON(http.StatusCreated, toItemResponse(item))
+	}
+}
+
+// search handles GET /api/games/search?q= — an IGDB name-search proxy for the
+// add-by-name flow.
+func (h *gamesHandler) search(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "query parameter q is required")
+		return
+	}
+
+	results, err := h.svc.Search(c.Request.Context(), q)
+	switch {
+	case errors.Is(err, games.ErrSearchUnavailable):
+		Error(c, http.StatusServiceUnavailable, CodeUpstreamError, "game search is not configured")
+	case errors.Is(err, games.ErrUpstream):
+		Error(c, http.StatusBadGateway, CodeUpstreamError, "IGDB is unreachable, try again")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "search failed")
+	default:
+		out := make([]gameSearchResult, 0, len(results))
+		for _, r := range results {
+			out = append(out, gameSearchResult{IGDBID: r.ID, Name: r.Name, Year: r.Year})
+		}
+		c.JSON(http.StatusOK, gin.H{"results": out})
+	}
+}
+
+// add handles POST /api/games/add {igdbId, status?} — add a game by name-search
+// pick, keyed by its IGDB id. Returns the shared game plus the new tracking item
+// (mirrors the movie add flow).
+func (h *gamesHandler) add(c *gin.Context) {
+	var req gameAddRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.IGDBID <= 0 {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with a positive igdbId")
+		return
+	}
+
+	game, item, err := h.svc.AddByIGDB(c.Request.Context(), CurrentUserID(c), req.IGDBID, req.Status)
+	switch {
+	case errors.Is(err, games.ErrInvalidStatus):
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "status must be PLAYING, PLAN_TO, COMPLETED, or STOPPED")
+	case errors.Is(err, games.ErrSearchUnavailable):
+		Error(c, http.StatusServiceUnavailable, CodeUpstreamError, "game search is not configured")
+	case errors.Is(err, games.ErrGameNotFound):
+		Error(c, http.StatusNotFound, CodeNotFound, "no game found for that IGDB id")
+	case errors.Is(err, games.ErrUpstream):
+		Error(c, http.StatusBadGateway, CodeUpstreamError, "IGDB is unreachable, try again")
+	case errors.Is(err, games.ErrAlreadyTracked):
+		c.JSON(http.StatusConflict, gin.H{
+			"error":   CodeAlreadyTracked,
+			"message": "you already track this game",
+			"item":    toItemResponse(item),
+		})
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "adding game failed")
+	default:
+		c.JSON(http.StatusCreated, gin.H{
+			"game": toGameResponse(game),
+			"item": toItemResponse(item),
+		})
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"github.com/davidlc1229/omnishelf/internal/models"
+	"github.com/davidlc1229/omnishelf/internal/tags"
 	"github.com/davidlc1229/omnishelf/internal/tmdb"
 )
 
@@ -167,6 +168,13 @@ func (s *Service) AddMovie(ctx context.Context, userID uint, tmdbID int) (*AddRe
 		}
 		if err := s.db.WithContext(ctx).Where("tmdb_id = ?", detail.ID).First(&movie).Error; err != nil {
 			return nil, fmt.Errorf("movies: reload movie: %w", err)
+		}
+		// Persist the movie's source-derived tags (TMDB keywords). Best-effort:
+		// a tag failure must never fail the add — the movie is already cached.
+		if names := detail.TagNames(); len(names) > 0 {
+			if err := tags.NewStore(s.db).Set(ctx, tags.TypeMovie, movie.ID, names); err != nil {
+				log.Printf("movies: persisting tags for movie %d failed: %v", tmdbID, err)
+			}
 		}
 		// Best-effort poster caching.
 		if movie.PosterPath == "" && detail.PosterPath != "" {

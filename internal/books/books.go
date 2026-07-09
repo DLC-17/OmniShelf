@@ -24,6 +24,7 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
+	"github.com/davidlc1229/omnishelf/internal/tags"
 )
 
 // Media types stored in TrackingItem.Type.
@@ -71,6 +72,9 @@ var (
 	// ErrItemNotFound means the tracking item does not exist for this user
 	// (including items owned by someone else — existence is not leaked).
 	ErrItemNotFound = errors.New("books: tracking item not found")
+	// ErrEmptyQuery means a title search / editions lookup was called with a
+	// blank query.
+	ErrEmptyQuery = errors.New("books: empty query")
 )
 
 // MetadataClient is the slice of *openlibrary.Client the service needs;
@@ -78,6 +82,8 @@ var (
 // errors.Is(err, openlibrary.ErrNotFound).
 type MetadataClient interface {
 	GetByISBN(ctx context.Context, isbn string) (*openlibrary.Book, error)
+	SearchByTitle(ctx context.Context, title string) ([]openlibrary.TitleResult, error)
+	ListEditions(ctx context.Context, workKey string) ([]openlibrary.Edition, error)
 	CoverURL(coverID int, size string) string
 }
 
@@ -161,6 +167,13 @@ func (s *Service) Scan(ctx context.Context, isbn string) (*models.Book, error) {
 	if err := s.upsertBook(ctx, &book); err != nil {
 		return nil, err
 	}
+	// Persist source-derived tags (OpenLibrary subjects) once the row has an
+	// ID. Best-effort: a tag failure must not fail the scan.
+	if len(meta.Subjects) > 0 {
+		if err := tags.NewStore(s.db).Set(ctx, tags.TypeBook, book.ID, meta.Subjects); err != nil {
+			log.Printf("books: persisting tags for %s failed: %v", book.ISBN13, err)
+		}
+	}
 	return &book, nil
 }
 
@@ -232,6 +245,36 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 	return &item, nil
 }
 
+// SearchTitle returns OpenLibrary works matching a free-text title query, for
+// the add-by-name flow. A blank query yields ErrEmptyQuery; an upstream failure
+// is wrapped in ErrUpstream. The caller lists a work's editions (ListEditions)
+// then adds the chosen ISBN through the existing Scan + Track path.
+func (s *Service) SearchTitle(ctx context.Context, title string) ([]openlibrary.TitleResult, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, ErrEmptyQuery
+	}
+	results, err := s.metadata.SearchByTitle(ctx, title)
+	if err != nil {
+		return nil, errors.Join(ErrUpstream, err)
+	}
+	return results, nil
+}
+
+// ListEditions returns the ISBN-bearing editions of a work so the user can pick
+// which edition (ISBN-13) to track. workKey is a SearchTitle result's WorkKey.
+func (s *Service) ListEditions(ctx context.Context, workKey string) ([]openlibrary.Edition, error) {
+	workKey = strings.TrimSpace(workKey)
+	if workKey == "" {
+		return nil, ErrEmptyQuery
+	}
+	editions, err := s.metadata.ListEditions(ctx, workKey)
+	if err != nil {
+		return nil, errors.Join(ErrUpstream, err)
+	}
+	return editions, nil
+}
+
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
@@ -261,12 +304,13 @@ func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string
 // the metadata needed by the library grid and its expandable detail view.
 type LibraryEntry struct {
 	Item        models.TrackingItem
-	ArtworkPath string // relative /images path; "" = placeholder
-	ShowID      uint   // internal Show.ID for TV items (0 for books)
-	Authors     string // books only
-	PageCount   int    // books only
-	Description string // books only
-	Platform    string // games only
+	ArtworkPath string   // relative /images path; "" = placeholder
+	ShowID      uint     // internal Show.ID for TV items (0 for books)
+	Authors     string   // books only
+	PageCount   int      // books only
+	Description string   // books only
+	Platform    string   // games only
+	Tags        []string // source-derived tags/keywords; never nil (empty when none)
 }
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
@@ -281,7 +325,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var tmdbIDs []int
 	var movieTMDBIDs []int
 	var isbns []string
-	var barcodes []string
+	var gameIGDBIDs []int
 	for _, it := range items {
 		switch it.Type {
 		case TypeTV:
@@ -295,7 +339,12 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		case TypeBook:
 			isbns = append(isbns, it.ExternalID)
 		case TypeGame:
-			barcodes = append(barcodes, it.ExternalID)
+			// GAME items are keyed by IGDB id (games.gameExternalID). Legacy
+			// items keyed by a barcode parse to a number that matches no IGDB
+			// id and simply fall through to the placeholder (backfill gap).
+			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
+				gameIGDBIDs = append(gameIGDBIDs, id)
+			}
 		}
 	}
 
@@ -319,14 +368,14 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			booksByISBN[b.ISBN13] = b
 		}
 	}
-	gamesByBarcode := map[string]models.Game{}
-	if len(barcodes) > 0 {
+	gamesByIGDB := map[string]models.Game{}
+	if len(gameIGDBIDs) > 0 {
 		var rows []models.Game
-		if err := s.db.WithContext(ctx).Where("barcode IN ?", barcodes).Find(&rows).Error; err != nil {
+		if err := s.db.WithContext(ctx).Where("igdb_id IN ?", gameIGDBIDs).Find(&rows).Error; err != nil {
 			return nil, fmt.Errorf("loading game metadata: %w", err)
 		}
 		for _, g := range rows {
-			gamesByBarcode[g.Barcode] = g
+			gamesByIGDB[strconv.Itoa(g.IGDBID)] = g
 		}
 	}
 	moviesByTMDB := map[string]models.Movie{}
@@ -341,14 +390,19 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	}
 
 	out := make([]LibraryEntry, 0, len(items))
+	// mediaKey records the shared cache-row primary key backing each entry, so
+	// its source-derived tags can be batch-loaded per media type below.
+	mediaKey := make([]uint, len(items))
+	tagIDsByType := map[string][]uint{}
 	for i := range items {
 		it := items[i]
-		entry := LibraryEntry{Item: it}
+		entry := LibraryEntry{Item: it, Tags: []string{}}
 		switch it.Type {
 		case TypeTV:
 			if sh, ok := shows[it.ExternalID]; ok {
 				entry.ArtworkPath = sh.PosterPath
 				entry.ShowID = sh.ID
+				mediaKey[i] = sh.ID
 			}
 		case TypeBook:
 			if b, ok := booksByISBN[it.ExternalID]; ok {
@@ -356,20 +410,47 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.Authors = b.Authors
 				entry.PageCount = b.PageCount
 				entry.Description = b.Description
+				mediaKey[i] = b.ID
 			}
 		case TypeGame:
-			if g, ok := gamesByBarcode[it.ExternalID]; ok {
+			if g, ok := gamesByIGDB[it.ExternalID]; ok {
 				entry.ArtworkPath = g.CoverPath
 				entry.Platform = g.Platform
 				entry.Description = g.Description
+				mediaKey[i] = g.ID
 			}
 		case TypeMovie:
 			if m, ok := moviesByTMDB[it.ExternalID]; ok {
 				entry.ArtworkPath = m.PosterPath
 				entry.Description = m.Overview
+				mediaKey[i] = m.ID
 			}
 		}
+		if mediaKey[i] != 0 {
+			tagIDsByType[it.Type] = append(tagIDsByType[it.Type], mediaKey[i])
+		}
 		out = append(out, entry)
+	}
+
+	// Attach source-derived tags with one batch query per media type.
+	store := tags.NewStore(s.db)
+	tagsByType := map[string]map[uint][]string{}
+	for typ, ids := range tagIDsByType {
+		byID, err := store.ForMedia(ctx, typ, ids)
+		if err != nil {
+			return nil, err
+		}
+		tagsByType[typ] = byID
+	}
+	for i := range out {
+		if mediaKey[i] == 0 {
+			continue
+		}
+		if byID, ok := tagsByType[out[i].Item.Type]; ok {
+			if names, ok := byID[mediaKey[i]]; ok {
+				out[i].Tags = names
+			}
+		}
 	}
 	return out, nil
 }

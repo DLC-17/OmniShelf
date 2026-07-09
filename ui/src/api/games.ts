@@ -12,6 +12,20 @@ export interface Game {
   description: string
 }
 
+/** One IGDB name-search hit from GET /api/games/search. */
+export interface GameSearchResult {
+  igdbId: number
+  name: string
+  /** First release year, or 0 when IGDB has no date. */
+  year: number
+}
+
+/** POST /api/games/add response: the shared game plus the new tracking item. */
+export interface AddGameResponse {
+  game: Game
+  item: TrackingItem
+}
+
 /** Tracking statuses a game may take. */
 export type GameStatus = 'PLAYING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
 
@@ -33,5 +47,25 @@ export function trackGame(gameId: number, status: GameStatus): Promise<TrackingI
   return request<TrackingItem>('/api/games/track', {
     method: 'POST',
     body: { gameId, status },
+  })
+}
+
+/** Search IGDB for games by title (add-by-name flow). */
+export async function searchGames(query: string): Promise<GameSearchResult[]> {
+  const res = await request<{ results: GameSearchResult[] }>(
+    `/api/games/search?q=${encodeURIComponent(query)}`,
+  )
+  return res.results
+}
+
+/**
+ * Add a game by its IGDB id (a name-search pick). Defaults to the PLAN_TO
+ * watchlist. A 409 ({error:"already_tracked"}) surfaces as an ApiError with
+ * status 409 so the caller can report it without treating it as a hard failure.
+ */
+export function addGameByIgdb(igdbId: number, status: GameStatus = 'PLAN_TO'): Promise<AddGameResponse> {
+  return request<AddGameResponse>('/api/games/add', {
+    method: 'POST',
+    body: { igdbId, status },
   })
 }

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -87,8 +88,9 @@ type Book struct {
 	Authors     []string
 	Description string
 	PageCount   int
-	CoverID     int // OpenLibrary cover ID; 0 = no cover known
+	CoverID     int      // OpenLibrary cover ID; 0 = no cover known
 	WorkKey     string
+	Subjects    []string // OpenLibrary work subjects (source-derived tags); may be empty
 }
 
 // edition is the /isbn/{isbn}.json payload subset we use.
@@ -110,6 +112,7 @@ type edition struct {
 type work struct {
 	Description json.RawMessage `json:"description"`
 	Covers      []int           `json:"covers"`
+	Subjects    []string        `json:"subjects"`
 	Authors     []struct {
 		Author struct {
 			Key string `json:"key"`
@@ -154,6 +157,7 @@ func (c *Client) GetByISBN(ctx context.Context, isbn string) (*Book, error) {
 		var w work
 		if err := c.getJSON(ctx, book.WorkKey+".json", &w); err == nil {
 			book.Description = decodeDescription(w.Description)
+			book.Subjects = w.Subjects
 			if book.CoverID == 0 && len(w.Covers) > 0 {
 				book.CoverID = w.Covers[0]
 			}
@@ -177,6 +181,101 @@ func (c *Client) GetByISBN(ctx context.Context, isbn string) (*Book, error) {
 	}
 
 	return book, nil
+}
+
+// TitleResult is one work returned by a title search. A work groups together
+// all editions of a book; the caller lists its editions to pick an ISBN.
+type TitleResult struct {
+	WorkKey      string // OpenLibrary work key, e.g. "/works/OL45804W"
+	Title        string
+	Authors      []string
+	FirstYear    int // first publication year; 0 when unknown
+	CoverID      int // OpenLibrary cover ID; 0 = no cover known
+	EditionCount int
+}
+
+// Edition is one ISBN-bearing edition of a work, for the ISBN picker.
+type Edition struct {
+	ISBN13      string
+	Title       string
+	PublishDate string // free-form as OpenLibrary returns it, e.g. "2004"
+	CoverID     int
+}
+
+// searchResponse is the /search.json payload subset we use.
+type searchResponse struct {
+	Docs []struct {
+		Key              string   `json:"key"`
+		Title            string   `json:"title"`
+		AuthorName       []string `json:"author_name"`
+		FirstPublishYear int      `json:"first_publish_year"`
+		CoverI           int      `json:"cover_i"`
+		EditionCount     int      `json:"edition_count"`
+	} `json:"docs"`
+}
+
+// SearchByTitle returns up to 20 works matching a free-text title query. Only a
+// transport/decode failure is an error; an empty result set yields an empty
+// slice. Callers list a work's editions (ListEditions) to choose an ISBN.
+func (c *Client) SearchByTitle(ctx context.Context, title string) ([]TitleResult, error) {
+	q := url.Values{
+		"title":  {title},
+		"fields": {"key,title,author_name,first_publish_year,cover_i,edition_count"},
+		"limit":  {"20"},
+	}
+	var resp searchResponse
+	if err := c.getJSON(ctx, "/search.json?"+q.Encode(), &resp); err != nil {
+		return nil, err
+	}
+	results := make([]TitleResult, 0, len(resp.Docs))
+	for _, d := range resp.Docs {
+		results = append(results, TitleResult{
+			WorkKey:      d.Key,
+			Title:        d.Title,
+			Authors:      d.AuthorName,
+			FirstYear:    d.FirstPublishYear,
+			CoverID:      d.CoverI,
+			EditionCount: d.EditionCount,
+		})
+	}
+	return results, nil
+}
+
+// editionsResponse is the /works/{id}/editions.json payload subset we use.
+type editionsResponse struct {
+	Entries []struct {
+		Title       string   `json:"title"`
+		ISBN13      []string `json:"isbn_13"`
+		PublishDate string   `json:"publish_date"`
+		Covers      []int    `json:"covers"`
+	} `json:"entries"`
+}
+
+// ListEditions returns the editions of a work that carry an ISBN-13 (the ones a
+// user can actually track). workKey is the "/works/OL...W" key from a
+// SearchByTitle result. Editions without an ISBN-13 are skipped.
+func (c *Client) ListEditions(ctx context.Context, workKey string) ([]Edition, error) {
+	key := strings.Trim(workKey, "/")
+	var resp editionsResponse
+	if err := c.getJSON(ctx, "/"+key+"/editions.json?limit=50", &resp); err != nil {
+		return nil, err
+	}
+	editions := make([]Edition, 0, len(resp.Entries))
+	for _, e := range resp.Entries {
+		if len(e.ISBN13) == 0 {
+			continue
+		}
+		ed := Edition{
+			ISBN13:      e.ISBN13[0],
+			Title:       e.Title,
+			PublishDate: e.PublishDate,
+		}
+		if len(e.Covers) > 0 {
+			ed.CoverID = e.Covers[0]
+		}
+		editions = append(editions, ed)
+	}
+	return editions, nil
 }
 
 // CoverURL returns the covers.openlibrary.org URL for a cover ID at the

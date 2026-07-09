@@ -94,17 +94,37 @@ type Game struct {
 	ID           int
 	Name         string
 	Summary      string
-	CoverImageID string // IGDB image_id, e.g. "co3p2d"; "" when no cover
+	CoverImageID string   // IGDB image_id, e.g. "co3p2d"; "" when no cover
+	ReleaseDate  string   // "YYYY-MM-DD" from first_release_date; "" when unknown
+	Genres       []string // IGDB genre names, e.g. "Role-playing (RPG)"; may be empty
+	Keywords     []string // IGDB keyword names; may be empty
+}
+
+// Tags returns the game's source-derived tags — its genres followed by its
+// keywords — as one flat list for persistence through internal/tags.
+func (g *Game) Tags() []string {
+	tags := make([]string, 0, len(g.Genres)+len(g.Keywords))
+	tags = append(tags, g.Genres...)
+	tags = append(tags, g.Keywords...)
+	return tags
+}
+
+// named models an IGDB sub-entity expanded to just its name (genres, keywords).
+type named struct {
+	Name string `json:"name"`
 }
 
 // gamePayload models one entry of the /games response.
 type gamePayload struct {
-	ID      int    `json:"id"`
-	Name    string `json:"name"`
-	Summary string `json:"summary"`
-	Cover   struct {
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	Summary          string `json:"summary"`
+	FirstReleaseDate int64  `json:"first_release_date"` // Unix epoch seconds; 0 = unknown
+	Cover            struct {
 		ImageID string `json:"image_id"`
 	} `json:"cover"`
+	Genres   []named `json:"genres"`
+	Keywords []named `json:"keywords"`
 }
 
 // GetGame fetches a game's name, summary and cover image id by its IGDB id.
@@ -120,7 +140,7 @@ func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
 		return nil, err
 	}
 
-	body := fmt.Sprintf("fields name,summary,cover.image_id; where id = %d;", igdbID)
+	body := fmt.Sprintf("fields name,summary,first_release_date,cover.image_id,genres.name,keywords.name; where id = %d;", igdbID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("igdb: build request: %w", err)
@@ -149,12 +169,106 @@ func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
 	}
 
 	p := payloads[0]
+	releaseDate := ""
+	if p.FirstReleaseDate > 0 {
+		releaseDate = time.Unix(p.FirstReleaseDate, 0).UTC().Format("2006-01-02")
+	}
 	return &Game{
 		ID:           p.ID,
 		Name:         p.Name,
 		Summary:      p.Summary,
 		CoverImageID: p.Cover.ImageID,
+		ReleaseDate:  releaseDate,
+		Genres:       names(p.Genres),
+		Keywords:     names(p.Keywords),
 	}, nil
+}
+
+// SearchResult is a lightweight IGDB search hit for the add-by-name flow. The
+// id is the canonical game identity a caller uses to add the game.
+type SearchResult struct {
+	ID           int
+	Name         string
+	Year         int    // first release year; 0 when unknown
+	CoverImageID string // IGDB image_id; "" when no cover
+}
+
+// searchPayload models one entry of the /games search response.
+type searchPayload struct {
+	ID               int    `json:"id"`
+	Name             string `json:"name"`
+	FirstReleaseDate int64  `json:"first_release_date"` // Unix epoch seconds; 0 = unknown
+	Cover            struct {
+		ImageID string `json:"image_id"`
+	} `json:"cover"`
+}
+
+// SearchGames returns up to 20 games matching a free-text name query, ordered by
+// IGDB relevance. An unconfigured client yields ErrUnconfigured. Callers use the
+// returned IGDB ids to add a game by name (identity = IGDB id).
+func (c *Client) SearchGames(ctx context.Context, name string) ([]SearchResult, error) {
+	if !c.Configured() {
+		return nil, ErrUnconfigured
+	}
+
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Escape embedded backslashes/quotes so the Apicalypse search string stays
+	// valid for a user-supplied query.
+	safe := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(name)
+	body := fmt.Sprintf(`search "%s"; fields name,first_release_date,cover.image_id; limit 20;`, safe)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("igdb: build search request: %w", err)
+	}
+	req.Header.Set("Client-ID", c.clientID)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("igdb: request search: %w", err)
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<18))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("igdb: search returned status %d: %s", resp.StatusCode, string(raw))
+	}
+
+	var payloads []searchPayload
+	if err := json.Unmarshal(raw, &payloads); err != nil {
+		return nil, fmt.Errorf("igdb: decode search: %w", err)
+	}
+
+	results := make([]SearchResult, 0, len(payloads))
+	for _, p := range payloads {
+		year := 0
+		if p.FirstReleaseDate > 0 {
+			year = time.Unix(p.FirstReleaseDate, 0).UTC().Year()
+		}
+		results = append(results, SearchResult{
+			ID:           p.ID,
+			Name:         p.Name,
+			Year:         year,
+			CoverImageID: p.Cover.ImageID,
+		})
+	}
+	return results, nil
+}
+
+// names flattens a slice of IGDB named sub-entities to their non-empty names.
+func names(items []named) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		if it.Name != "" {
+			out = append(out, it.Name)
+		}
+	}
+	return out
 }
 
 // CoverURL returns the images.igdb.com URL for a cover image id at the given

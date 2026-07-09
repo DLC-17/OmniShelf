@@ -81,8 +81,9 @@ function UnresolvedForm({ jobId, unresolved }: UnresolvedFormProps) {
     <form onSubmit={handleSubmit} aria-label="Resolve unmatched titles">
       <h3>Unmatched titles</h3>
       <p>
-        These shows could not be matched automatically. Look each one up on TMDB and enter its
-        show ID to finish importing it — or leave it blank to skip.
+        These titles could not be matched automatically. Look each one up on TMDB and enter its
+        ID to finish importing it — a show ID for series, a movie ID for films — or leave it blank
+        to skip.
       </p>
       <ul className="list">
         {unresolved.map((title) => (
@@ -201,9 +202,10 @@ export default function Import() {
     <section>
       <h1>Import</h1>
       <p>
-        Import your history — TV Time (<code>followed_shows.csv</code> /{' '}
-        <code>seen_episodes.csv</code>) or a Goodreads{' '}
-        <code>library_export.csv</code>. Raw CSVs or a zip export both work.
+        Import your history — TV Time (<code>followed_shows.csv</code>,{' '}
+        <code>seen_episodes.csv</code>, or the unified tracking export, which also brings in your
+        watched movies) or a Goodreads <code>library_export.csv</code>. Raw CSVs or a zip export
+        both work.
       </p>
 
       {jobId === null ? (

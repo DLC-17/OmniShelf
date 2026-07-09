@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -49,6 +50,59 @@ func chooseMatch(title string, results []tmdb.SearchResult) int {
 		return bestID
 	}
 	return 0
+}
+
+// chooseMovieMatch picks a TMDB movie for a title from movie search results,
+// mirroring chooseMatch but over movie titles: an exact normalized-title match
+// wins (and when the CSV supplies a release year, an exact match sharing that
+// year is preferred to disambiguate remakes); otherwise the highest fuzzy
+// similarity above matchThreshold; otherwise nil (unresolved).
+func chooseMovieMatch(title string, year int, results []tmdb.MovieResult) *tmdb.MovieResult {
+	norm := normalizeTitle(title)
+	if norm == "" {
+		return nil
+	}
+	var exact []*tmdb.MovieResult
+	for i := range results {
+		if normalizeTitle(results[i].Title) == norm {
+			exact = append(exact, &results[i])
+		}
+	}
+	if len(exact) > 0 {
+		if year > 0 {
+			for _, r := range exact {
+				if movieYear(r.ReleaseDate) == year {
+					return r
+				}
+			}
+		}
+		return exact[0]
+	}
+
+	var best *tmdb.MovieResult
+	bestScore := 0.0
+	for i := range results {
+		if s := similarity(norm, normalizeTitle(results[i].Title)); s > bestScore {
+			best, bestScore = &results[i], s
+		}
+	}
+	if bestScore >= matchThreshold {
+		return best
+	}
+	return nil
+}
+
+// movieYear extracts the four-digit year from a "YYYY-MM-DD" (or "YYYY") date,
+// returning 0 when there is none to compare against.
+func movieYear(date string) int {
+	if len(date) < 4 {
+		return 0
+	}
+	y, err := strconv.Atoi(date[:4])
+	if err != nil {
+		return 0
+	}
+	return y
 }
 
 // similarity is 1 - levenshtein/maxLen over rune slices, in [0,1].

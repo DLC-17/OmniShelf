@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
+	"github.com/davidlc1229/omnishelf/internal/tags"
 )
 
 // TypeGame is the TrackingItem.Type for games. It mirrors books.TypeGame; kept
@@ -51,6 +53,11 @@ var (
 	ErrAlreadyTracked = errors.New("games: game already tracked")
 	// ErrInvalidStatus means the status is not valid for a game.
 	ErrInvalidStatus = errors.New("games: invalid status")
+	// ErrSearchUnavailable means IGDB name search is not configured (no
+	// credentials) so games can only be added by barcode scan.
+	ErrSearchUnavailable = errors.New("games: search unavailable")
+	// ErrEmptyQuery means a name search was called with a blank query.
+	ErrEmptyQuery = errors.New("games: empty search query")
 )
 
 // MetadataClient is the slice of *scandex.Client the service needs; tests
@@ -61,10 +68,12 @@ type MetadataClient interface {
 }
 
 // Enricher is the slice of *igdb.Client the service needs to add a cover and
-// summary. Optional: when nil (or unconfigured) games keep their ScanDex
-// title/platform with no cover or summary.
+// summary, resolve a game by IGDB id, and search by name. Optional: when nil (or
+// unconfigured) games keep their ScanDex title/platform with no cover or summary
+// and name search is disabled.
 type Enricher interface {
 	GetGame(ctx context.Context, igdbID int) (*igdb.Game, error)
+	SearchGames(ctx context.Context, name string) ([]igdb.SearchResult, error)
 	CoverURL(imageID, size string) string
 }
 
@@ -132,22 +141,31 @@ func (s *Service) Scan(ctx context.Context, barcode string) (*models.Game, error
 		Platform: meta.Platform,
 		IGDBID:   meta.IGDBID,
 	}
-	s.enrichFromIGDB(ctx, &game)
+	gameTags := s.enrichFromIGDB(ctx, &game)
 	if err := s.upsertGame(ctx, &game); err != nil {
 		return nil, err
+	}
+	// Persist source-derived tags after the row has an ID. Best-effort: a tag
+	// failure must not fail the scan (the game is already saved).
+	if len(gameTags) > 0 {
+		if err := tags.NewStore(s.db).Set(ctx, tags.TypeGame, game.ID, gameTags); err != nil {
+			log.Printf("games: persisting tags for %s failed: %v", game.Barcode, err)
+		}
 	}
 	return &game, nil
 }
 
 // enrichFromIGDB augments a freshly-scanned game with its IGDB summary and
-// cover. It is best-effort: a missing IGDB id, unconfigured/erroring IGDB, or a
-// failed cover download is logged and leaves the affected field empty (the game
-// is still saved with its ScanDex title/platform). The nightly artwork retry
-// is not wired for games yet, so a transient cover failure simply means no
-// cover until the barcode is re-scanned.
-func (s *Service) enrichFromIGDB(ctx context.Context, game *models.Game) {
+// cover and returns the game's source-derived tags (genres + keywords) for the
+// caller to persist once the row has an ID. It is best-effort: a missing IGDB
+// id, unconfigured/erroring IGDB, or a failed cover download is logged and
+// leaves the affected field empty / the tag list nil (the game is still saved
+// with its ScanDex title/platform). The nightly artwork retry is not wired for
+// games yet, so a transient cover failure simply means no cover until the
+// barcode is re-scanned.
+func (s *Service) enrichFromIGDB(ctx context.Context, game *models.Game) []string {
 	if s.enrich == nil || game.IGDBID == 0 {
-		return
+		return nil
 	}
 
 	detail, err := s.enrich.GetGame(ctx, game.IGDBID)
@@ -155,55 +173,120 @@ func (s *Service) enrichFromIGDB(ctx context.Context, game *models.Game) {
 		if !errors.Is(err, igdb.ErrUnconfigured) {
 			log.Printf("games: IGDB lookup for %d failed: %v", game.IGDBID, err)
 		}
-		return
+		return nil
 	}
 	if detail == nil {
-		return
+		return nil
 	}
 
 	game.Description = detail.Summary
+	game.ReleaseDate = detail.ReleaseDate
 	if game.Title == "" {
 		game.Title = detail.Name
 	}
+	s.downloadCover(ctx, game, detail.CoverImageID)
 
-	if s.images == nil {
-		return
-	}
-	if url := s.enrich.CoverURL(detail.CoverImageID, ""); url != "" {
-		path, err := s.images.Fetch(ctx, s.httpClient, url, "game", game.Barcode)
-		if err != nil {
-			log.Printf("games: cover download for %s failed: %v", game.Barcode, err)
-			return
-		}
-		game.CoverPath = path
-	}
+	return detail.Tags()
 }
 
-// upsertGame creates the Game row or refreshes an existing one for the barcode.
+// downloadCover best-effort caches a game's IGDB cover. The cached file is keyed
+// by the game's barcode when it has one (a scanned game) and by its IGDB id
+// otherwise (name-search / GOG game), so both identities land at a stable path.
+// A missing image id, nil image store, or failed download leaves CoverPath
+// untouched.
+func (s *Service) downloadCover(ctx context.Context, game *models.Game, imageID string) {
+	if s.enrich == nil || s.images == nil || imageID == "" {
+		return
+	}
+	url := s.enrich.CoverURL(imageID, "")
+	if url == "" {
+		return
+	}
+	key := game.Barcode
+	if key == "" {
+		key = "igdb-" + strconv.Itoa(game.IGDBID)
+	}
+	path, err := s.images.Fetch(ctx, s.httpClient, url, "game", key)
+	if err != nil {
+		log.Printf("games: cover download for %s failed: %v", key, err)
+		return
+	}
+	game.CoverPath = path
+}
+
+// upsertGame creates the Game row or refreshes an existing one, keyed by the
+// canonical IGDB id when the game has one and by barcode otherwise. Merging onto
+// the existing row never clears a value already known (cover, barcode, platform,
+// summary), so a re-scan can backfill an IGDB id onto a barcode-only row and a
+// name-add can enrich a previously bare row.
 func (s *Service) upsertGame(ctx context.Context, game *models.Game) error {
-	var existing models.Game
-	err := s.db.WithContext(ctx).Where(&models.Game{Barcode: game.Barcode}).First(&existing).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
+	existing, err := s.findGame(ctx, game.IGDBID, game.Barcode)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
 		if err := s.db.WithContext(ctx).Create(game).Error; err != nil {
+			// A concurrent writer may have created the canonical row between our
+			// lookup and Create; reload and merge onto the winner instead of
+			// blindly retrying.
 			if isUniqueViolation(err) {
-				return s.upsertGame(ctx, game)
+				if existing, err = s.findGame(ctx, game.IGDBID, game.Barcode); err != nil {
+					return err
+				}
 			}
-			return fmt.Errorf("creating game %s: %w", game.Barcode, err)
+			if existing == nil {
+				return fmt.Errorf("creating game (igdb %d barcode %q): %w", game.IGDBID, game.Barcode, err)
+			}
+		} else {
+			return nil
 		}
-		return nil
-	case err != nil:
-		return fmt.Errorf("looking up game %s: %w", game.Barcode, err)
 	}
 
 	game.ID = existing.ID
 	if game.CoverPath == "" {
 		game.CoverPath = existing.CoverPath
 	}
+	if game.Barcode == "" {
+		game.Barcode = existing.Barcode
+	}
+	if game.IGDBID == 0 {
+		game.IGDBID = existing.IGDBID
+	}
+	if game.Platform == "" {
+		game.Platform = existing.Platform
+	}
+	if game.Description == "" {
+		game.Description = existing.Description
+	}
 	if err := s.db.WithContext(ctx).Save(game).Error; err != nil {
-		return fmt.Errorf("updating game %s: %w", game.Barcode, err)
+		return fmt.Errorf("updating game %d: %w", existing.ID, err)
 	}
 	return nil
+}
+
+// findGame locates a cached game by its IGDB id (preferred, canonical) or, when
+// no IGDB id is known, by barcode. Returns (nil, nil) when neither matches.
+func (s *Service) findGame(ctx context.Context, igdbID int, barcode string) (*models.Game, error) {
+	var g models.Game
+	if igdbID != 0 {
+		err := s.db.WithContext(ctx).Where(&models.Game{IGDBID: igdbID}).First(&g).Error
+		if err == nil {
+			return &g, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("looking up game by igdb %d: %w", igdbID, err)
+		}
+	}
+	if barcode != "" {
+		err := s.db.WithContext(ctx).Where(&models.Game{Barcode: barcode}).First(&g).Error
+		if err == nil {
+			return &g, nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("looking up game by barcode %s: %w", barcode, err)
+		}
+	}
+	return nil, nil
 }
 
 // Track creates the user's TrackingItem for a scanned game. A duplicate returns
@@ -220,11 +303,91 @@ func (s *Service) Track(ctx context.Context, userID, gameID uint, status string)
 		}
 		return nil, fmt.Errorf("looking up game %d: %w", gameID, err)
 	}
+	return s.createTracking(ctx, userID, &game, status)
+}
 
+// Search returns IGDB name-search candidates for the add-by-name flow. It yields
+// ErrEmptyQuery for a blank query and ErrSearchUnavailable when IGDB is not
+// configured, so games remain addable by barcode scan even without credentials.
+func (s *Service) Search(ctx context.Context, name string) ([]igdb.SearchResult, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, ErrEmptyQuery
+	}
+	if s.enrich == nil {
+		return nil, ErrSearchUnavailable
+	}
+	results, err := s.enrich.SearchGames(ctx, name)
+	if err != nil {
+		if errors.Is(err, igdb.ErrUnconfigured) {
+			return nil, ErrSearchUnavailable
+		}
+		return nil, errors.Join(ErrUpstream, err)
+	}
+	return results, nil
+}
+
+// AddByIGDB resolves an IGDB id to a shared Game cache row (keyed by that id,
+// with no barcode) and creates the user's tracking item — the name-search
+// counterpart to Scan+Track. DB-first: a game already cached is reused without
+// an IGDB round-trip. status defaults to PLAN_TO ("plan to play"). A duplicate
+// returns the existing item alongside ErrAlreadyTracked so the API can 409.
+func (s *Service) AddByIGDB(ctx context.Context, userID uint, igdbID int, status string) (*models.Game, *models.TrackingItem, error) {
+	if igdbID <= 0 {
+		return nil, nil, ErrGameNotFound
+	}
+	if status == "" {
+		status = StatusPlanTo
+	}
+	if !validStatus(status) {
+		return nil, nil, fmt.Errorf("%w: %q is not valid for games", ErrInvalidStatus, status)
+	}
+
+	existing, err := s.findGame(ctx, igdbID, "")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var game models.Game
+	if existing != nil {
+		game = *existing
+	} else {
+		if s.enrich == nil {
+			return nil, nil, ErrSearchUnavailable
+		}
+		detail, derr := s.enrich.GetGame(ctx, igdbID)
+		if derr != nil {
+			if errors.Is(derr, igdb.ErrUnconfigured) {
+				return nil, nil, ErrSearchUnavailable
+			}
+			return nil, nil, errors.Join(ErrUpstream, derr)
+		}
+		if detail == nil {
+			return nil, nil, ErrGameNotFound
+		}
+		game = models.Game{IGDBID: igdbID, Title: detail.Name, Description: detail.Summary}
+		s.downloadCover(ctx, &game, detail.CoverImageID)
+		if err := s.upsertGame(ctx, &game); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	item, terr := s.createTracking(ctx, userID, &game, status)
+	if terr != nil && !errors.Is(terr, ErrAlreadyTracked) {
+		return nil, nil, terr
+	}
+	return &game, item, terr
+}
+
+// createTracking links a game to the user as a GAME tracking item. The
+// ExternalID is the game's canonical key (see gameExternalID). A duplicate
+// returns the existing item with ErrAlreadyTracked.
+func (s *Service) createTracking(ctx context.Context, userID uint, game *models.Game, status string) (*models.TrackingItem, error) {
+	externalID := gameExternalID(game)
 	item := models.TrackingItem{
 		UserID:     userID,
 		Type:       TypeGame,
-		ExternalID: game.Barcode,
+		ExternalID: externalID,
 		Title:      game.Title,
 		Status:     status,
 	}
@@ -232,7 +395,7 @@ func (s *Service) Track(ctx context.Context, userID, gameID uint, status string)
 		if isUniqueViolation(err) {
 			var existing models.TrackingItem
 			ferr := s.db.WithContext(ctx).
-				Where("user_id = ? AND type = ? AND external_id = ?", userID, TypeGame, game.Barcode).
+				Where("user_id = ? AND type = ? AND external_id = ?", userID, TypeGame, externalID).
 				First(&existing).Error
 			if ferr != nil {
 				return nil, fmt.Errorf("loading existing tracking item: %w", ferr)
@@ -242,6 +405,17 @@ func (s *Service) Track(ctx context.Context, userID, gameID uint, status string)
 		return nil, fmt.Errorf("creating tracking item: %w", err)
 	}
 	return &item, nil
+}
+
+// gameExternalID is the TrackingItem.ExternalID for a game: its canonical IGDB
+// id (as a string) when known, else the barcode for the legacy case of a game
+// ScanDex could not map to IGDB. The library join in internal/books resolves
+// GAME items back to their Game row by this key.
+func gameExternalID(game *models.Game) string {
+	if game.IGDBID != 0 {
+		return strconv.Itoa(game.IGDBID)
+	}
+	return game.Barcode
 }
 
 // validStatus reports whether status is allowed for a game.

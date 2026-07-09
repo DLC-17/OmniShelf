@@ -110,6 +110,24 @@ type SeasonSummary struct {
 	AirDate      string `json:"air_date"`
 }
 
+// Keyword is one TMDB keyword (a source-derived tag).
+type Keyword struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// tvKeywords is the shape of the TV `keywords` append_to_response block:
+// {"keywords": {"results": [...]}}.
+type tvKeywords struct {
+	Results []Keyword `json:"results"`
+}
+
+// movieKeywords is the shape of the movie `keywords` append_to_response block:
+// {"keywords": {"keywords": [...]}}.
+type movieKeywords struct {
+	Keywords []Keyword `json:"keywords"`
+}
+
 // Show is the TMDB TV show detail payload.
 type Show struct {
 	ID           int             `json:"id"`
@@ -119,6 +137,18 @@ type Show struct {
 	FirstAirDate string          `json:"first_air_date"`
 	PosterPath   string          `json:"poster_path"`
 	Seasons      []SeasonSummary `json:"seasons"`
+	Keywords     tvKeywords      `json:"keywords"` // from append_to_response=keywords
+}
+
+// TagNames returns the show's source-derived tag names (its TMDB keywords).
+func (s *Show) TagNames() []string {
+	out := make([]string, 0, len(s.Keywords.Results))
+	for _, k := range s.Keywords.Results {
+		if k.Name != "" {
+			out = append(out, k.Name)
+		}
+	}
+	return out
 }
 
 // Episode is one episode inside a season detail payload.
@@ -160,12 +190,24 @@ type MovieSearchResponse struct {
 
 // Movie is the TMDB movie detail payload.
 type Movie struct {
-	ID          int    `json:"id"`
-	Title       string `json:"title"`
-	Overview    string `json:"overview"`
-	Status      string `json:"status"` // "Released", "Post Production", ...
-	ReleaseDate string `json:"release_date"`
-	PosterPath  string `json:"poster_path"`
+	ID          int           `json:"id"`
+	Title       string        `json:"title"`
+	Overview    string        `json:"overview"`
+	Status      string        `json:"status"` // "Released", "Post Production", ...
+	ReleaseDate string        `json:"release_date"`
+	PosterPath  string        `json:"poster_path"`
+	Keywords    movieKeywords `json:"keywords"` // from append_to_response=keywords
+}
+
+// TagNames returns the movie's source-derived tag names (its TMDB keywords).
+func (m *Movie) TagNames() []string {
+	out := make([]string, 0, len(m.Keywords.Keywords))
+	for _, k := range m.Keywords.Keywords {
+		if k.Name != "" {
+			out = append(out, k.Name)
+		}
+	}
+	return out
 }
 
 // SearchMovie searches TMDB movies by title.
@@ -178,10 +220,12 @@ func (c *Client) SearchMovie(ctx context.Context, query string) (*MovieSearchRes
 	return &out, nil
 }
 
-// GetMovie fetches a movie's details (title, overview, poster, release date).
+// GetMovie fetches a movie's details (title, overview, poster, release date)
+// plus its source-derived keywords in one request via append_to_response.
 func (c *Client) GetMovie(ctx context.Context, id int) (*Movie, error) {
 	var out Movie
-	if err := c.get(ctx, fmt.Sprintf("/movie/%d", id), nil, &out); err != nil {
+	q := url.Values{"append_to_response": {"keywords"}}
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d", id), q, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -206,11 +250,12 @@ func (c *Client) SearchTV(ctx context.Context, query string) (*SearchResponse, e
 	return &out, nil
 }
 
-// GetShow fetches a show's details, including its seasons list, poster path
-// and airing status.
+// GetShow fetches a show's details, including its seasons list, poster path,
+// airing status, and its source-derived keywords (append_to_response=keywords).
 func (c *Client) GetShow(ctx context.Context, id int) (*Show, error) {
 	var out Show
-	if err := c.get(ctx, fmt.Sprintf("/tv/%d", id), nil, &out); err != nil {
+	q := url.Values{"append_to_response": {"keywords"}}
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d", id), q, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

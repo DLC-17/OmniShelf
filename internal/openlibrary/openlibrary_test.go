@@ -146,3 +146,54 @@ func TestCoverURL(t *testing.T) {
 	custom := New(testEmail, WithCoverBaseURL("http://127.0.0.1:9/"))
 	assert.Equal(t, "http://127.0.0.1:9/b/id/1-S.jpg", custom.CoverURL(1, "S"))
 }
+
+// TestSearchByTitle exercises the title-search proxy against an inline server.
+func TestSearchByTitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search.json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"docs":[
+			{"key":"/works/OL45804W","title":"Fantastic Mr Fox","author_name":["Roald Dahl"],"first_publish_year":1970,"cover_i":8739161,"edition_count":42},
+			{"key":"/works/OL2W","title":"Fantastic Mr Fox (abridged)"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := New(testEmail, WithBaseURL(srv.URL))
+	results, err := c.SearchByTitle(context.Background(), "fantastic mr fox")
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, "/works/OL45804W", results[0].WorkKey)
+	assert.Equal(t, "Fantastic Mr Fox", results[0].Title)
+	assert.Equal(t, []string{"Roald Dahl"}, results[0].Authors)
+	assert.Equal(t, 1970, results[0].FirstYear)
+	assert.Equal(t, 42, results[0].EditionCount)
+	assert.Equal(t, 0, results[1].FirstYear)
+}
+
+// TestListEditions returns only editions that carry an ISBN-13.
+func TestListEditions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/works/OL45804W/editions.json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"entries":[
+			{"title":"Fantastic Mr Fox","isbn_13":["9780140328721"],"publish_date":"1988","covers":[8739161]},
+			{"title":"No ISBN Edition","publish_date":"1970"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := New(testEmail, WithBaseURL(srv.URL))
+	editions, err := c.ListEditions(context.Background(), "/works/OL45804W")
+	require.NoError(t, err)
+	require.Len(t, editions, 1, "editions without an ISBN-13 are skipped")
+	assert.Equal(t, "9780140328721", editions[0].ISBN13)
+	assert.Equal(t, "1988", editions[0].PublishDate)
+	assert.Equal(t, 8739161, editions[0].CoverID)
+}

@@ -30,6 +30,8 @@ export interface LibraryItem {
   description: string
   /** Games only. */
   platform: string
+  /** Source-derived tags/keywords (TMDB/IGDB/OpenLibrary); [] when none. */
+  tags: string[]
   updatedAt: string
 }
 

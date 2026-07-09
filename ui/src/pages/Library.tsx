@@ -7,6 +7,8 @@ import Poster from '../components/tv/Poster'
 import { BookScan, GameScan } from './Scan'
 import { useLibrary } from '../hooks/useLibrary'
 import ShowSearch from '../components/tv/ShowSearch'
+import GameSearch from '../components/games/GameSearch'
+import BookSearch from '../components/books/BookSearch'
 
 const TABS: { value: MediaType; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
@@ -69,12 +71,14 @@ export default function Library() {
       )}
       {media === 'BOOK' && (
         <>
+        <BookSearch />
         <BookScan />
         <hr/>
         </>
       )}
       {media=== 'GAME' && (
         <>
+        <GameSearch />
         <GameScan/>
         <hr/>
         </>

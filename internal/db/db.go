@@ -4,6 +4,7 @@ package db
 
 import (
 	"fmt"
+	"log"
 	"path/filepath"
 
 	"github.com/glebarez/sqlite"
@@ -41,5 +42,38 @@ func Open(dataDir string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("auto-migrate models: %w", err)
 	}
 
+	if err := migrateGameIdentity(gdb); err != nil {
+		return nil, fmt.Errorf("migrating game identity: %w", err)
+	}
+
 	return gdb, nil
+}
+
+// migrateGameIdentity enforces the Game identity model: the IGDB game id is the
+// canonical key and the barcode an optional alternate lookup. Both uniques are
+// PARTIAL so the change is safe on databases created before IGDB keying:
+//
+//   - igdb_id is unique only among rows that actually carry one (igdb_id <> 0),
+//     so pre-existing rows ScanDex could not map to IGDB (igdb_id = 0) never
+//     collide with each other.
+//   - barcode is unique only among rows that carry one (barcode <> ''), so games
+//     added by name search or GOG import (no barcode) never collide.
+//
+// BACKFILL GAP: rows written before this migration keep igdb_id = 0 whenever
+// ScanDex returned no IGDB id; they are not retro-resolved here. Re-scanning
+// such a game records its IGDB id and backfills the row. An index create that
+// fails because existing data already violates it (e.g. two rows sharing a real
+// igdb_id) is logged and skipped rather than aborting startup, so an upgrade
+// never crashes on legacy data.
+func migrateGameIdentity(gdb *gorm.DB) error {
+	stmts := []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_games_igdb_id ON games(igdb_id) WHERE igdb_id <> 0`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_games_barcode ON games(barcode) WHERE barcode <> ''`,
+	}
+	for _, s := range stmts {
+		if err := gdb.Exec(s).Error; err != nil {
+			log.Printf("db: skipping game identity index (existing data conflict?): %v", err)
+		}
+	}
+	return nil
 }

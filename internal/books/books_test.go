@@ -23,8 +23,10 @@ const (
 
 // fakeMetadata is a canned MetadataClient.
 type fakeMetadata struct {
-	books map[string]*openlibrary.Book
-	err   error
+	books    map[string]*openlibrary.Book
+	titles   []openlibrary.TitleResult
+	editions map[string][]openlibrary.Edition
+	err      error
 }
 
 func (f *fakeMetadata) GetByISBN(_ context.Context, isbn string) (*openlibrary.Book, error) {
@@ -36,6 +38,20 @@ func (f *fakeMetadata) GetByISBN(_ context.Context, isbn string) (*openlibrary.B
 		return nil, &openlibrary.NotFoundError{ISBN: isbn}
 	}
 	return b, nil
+}
+
+func (f *fakeMetadata) SearchByTitle(_ context.Context, _ string) ([]openlibrary.TitleResult, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.titles, nil
+}
+
+func (f *fakeMetadata) ListEditions(_ context.Context, workKey string) ([]openlibrary.Edition, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.editions[workKey], nil
 }
 
 func (f *fakeMetadata) CoverURL(coverID int, _ string) string {
@@ -104,6 +120,42 @@ func TestScanHappyPath(t *testing.T) {
 	var stored models.Book
 	require.NoError(t, gdb.Where(&models.Book{ISBN13: testISBN}).First(&stored).Error)
 	assert.Equal(t, book.ID, stored.ID)
+}
+
+// OpenLibrary subjects are persisted as source-derived tags on the book and
+// surfaced on the library DTO by ListLibrary.
+func TestScanPersistsSubjectsAndListsTags(t *testing.T) {
+	meta := fullMeta()
+	meta.Subjects = []string{"Computer networks", "Fiction"}
+	svc, _ := newTestService(t, &fakeMetadata{books: map[string]*openlibrary.Book{testISBN: meta}}, &fakeImages{})
+	ctx := context.Background()
+
+	book, err := svc.Scan(ctx, testISBN)
+	require.NoError(t, err)
+	_, err = svc.Track(ctx, 1, book.ID, StatusReading)
+	require.NoError(t, err)
+
+	entries, err := svc.ListLibrary(ctx, 1, TypeBook, "")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, []string{"Computer networks", "Fiction"}, entries[0].Tags)
+}
+
+// An item with no source tags serializes an empty (non-nil) tag list.
+func TestListLibraryTagsDefaultEmpty(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{books: map[string]*openlibrary.Book{testISBN: fullMeta()}}, &fakeImages{})
+	ctx := context.Background()
+
+	book, err := svc.Scan(ctx, testISBN)
+	require.NoError(t, err)
+	_, err = svc.Track(ctx, 1, book.ID, StatusReading)
+	require.NoError(t, err)
+
+	entries, err := svc.ListLibrary(ctx, 1, TypeBook, "")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.NotNil(t, entries[0].Tags)
+	assert.Empty(t, entries[0].Tags)
 }
 
 func TestScanInvalidISBN(t *testing.T) {
@@ -372,4 +424,46 @@ func TestScanIsDBFirst(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, second.ID)
 	assert.Equal(t, "Networking Basics", second.Title)
+}
+
+// SearchTitle delegates to OpenLibrary and returns its works.
+func TestSearchTitleDelegates(t *testing.T) {
+	meta := &fakeMetadata{titles: []openlibrary.TitleResult{
+		{WorkKey: "/works/OL1W", Title: "Networking Basics", Authors: []string{"Jane Doe"}, FirstYear: 2004, EditionCount: 3},
+	}}
+	svc, _ := newTestService(t, meta, &fakeImages{})
+
+	res, err := svc.SearchTitle(context.Background(), "networking")
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, "/works/OL1W", res[0].WorkKey)
+}
+
+// A blank title never reaches OpenLibrary.
+func TestSearchTitleEmptyQuery(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{}, &fakeImages{})
+
+	_, err := svc.SearchTitle(context.Background(), "   ")
+	require.ErrorIs(t, err, ErrEmptyQuery)
+}
+
+// ListEditions returns the ISBN-bearing editions for a work's picker.
+func TestListEditions(t *testing.T) {
+	meta := &fakeMetadata{editions: map[string][]openlibrary.Edition{
+		"/works/OL1W": {{ISBN13: testISBN, Title: "Networking Basics", PublishDate: "2004"}},
+	}}
+	svc, _ := newTestService(t, meta, &fakeImages{})
+
+	res, err := svc.ListEditions(context.Background(), "/works/OL1W")
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	assert.Equal(t, testISBN, res[0].ISBN13)
+}
+
+// A blank work key is rejected before any upstream call.
+func TestListEditionsEmptyQuery(t *testing.T) {
+	svc, _ := newTestService(t, &fakeMetadata{}, &fakeImages{})
+
+	_, err := svc.ListEditions(context.Background(), "")
+	require.ErrorIs(t, err, ErrEmptyQuery)
 }

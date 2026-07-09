@@ -83,17 +83,49 @@ type Movie struct {
 	LastSyncedAt time.Time
 }
 
-// Game is the shared ScanDex/IGDB metadata cache (one row per barcode, all
-// users). ScanDex supplies title, platform and the IGDB id; cover art is not
-// part of its payload, so CoverPath is usually empty.
+// Game is the shared IGDB metadata cache (one row per game, all users). The
+// IGDB game id is the canonical identity; Barcode is an optional alternate
+// lookup that a ScanDex barcode scan fills in and that is empty ("") for games
+// added by name search or GOG import.
+//
+// Uniqueness is enforced by two PARTIAL unique indexes created in db.Open
+// (idx_games_igdb_id WHERE igdb_id <> 0, idx_games_barcode WHERE barcode <> '').
+// The struct tags stay plain on purpose: a full unique index would fail
+// AutoMigrate on pre-IGDB-keying databases, whose rows can share igdb_id = 0.
+// See db.migrateGameIdentity for the backfill gap.
 type Game struct {
 	ID          uint   `gorm:"primaryKey"`
-	Barcode     string `gorm:"unique;not null"` // scanned UPC/EAN
+	IGDBID      int    // canonical identity; unique among rows where igdb_id <> 0
+	Barcode     string // optional scanned UPC/EAN; "" for name-search / GOG games
 	Title       string `gorm:"not null"`
 	Platform    string
 	CoverPath   string
-	IGDBID      int
 	Description string // IGDB summary; may be empty
+	ReleaseDate string // "YYYY-MM-DD" from IGDB first_release_date; "" when unknown
+}
+
+// Tag is a source-derived keyword/genre, shared across every media item that
+// carries it (one row per normalized slug). Tags are NEVER user-created: they
+// come only from upstream sources (TMDB keywords, IGDB genres/keywords,
+// OpenLibrary subjects). Name is the human-readable label; Slug is the
+// normalized, unique key used for dedupe and lookup.
+type Tag struct {
+	ID   uint   `gorm:"primaryKey"`
+	Name string `gorm:"not null"`
+	Slug string `gorm:"unique;not null"`
+}
+
+// MediaTag links a Tag to one shared metadata cache row (Show/Movie/Game/Book).
+// It is media-type-agnostic: MediaType mirrors TrackingItem.Type ("TV",
+// "MOVIE", "GAME", "BOOK") and MediaID is the primary key of the corresponding
+// cache row. This is the join surface future per-type tag filters (#13) and
+// search (#14) query against; the composite (media_type, media_id) index makes
+// "tags for this item" cheap, and the unique index guards against dupes.
+type MediaTag struct {
+	ID        uint   `gorm:"primaryKey"`
+	TagID     uint   `gorm:"not null;index;uniqueIndex:idx_media_tag"`
+	MediaType string `gorm:"type:varchar(10);not null;uniqueIndex:idx_media_tag;index:idx_media_lookup"`
+	MediaID   uint   `gorm:"not null;uniqueIndex:idx_media_tag;index:idx_media_lookup"`
 }
 
 // ShowAlias remembers that an imported (normalized) series title resolved to a
@@ -152,5 +184,7 @@ func All() []any {
 		&SyncLog{},
 		&RejectedRec{},
 		&ShowAlias{},
+		&Tag{},
+		&MediaTag{},
 	}
 }

@@ -40,6 +40,36 @@ interface ErrorEnvelope {
   message?: string
 }
 
+/**
+ * Uploads multipart form data (e.g. a file) to path and returns the parsed JSON
+ * response. Unlike `request` it does not set Content-Type — the browser sets
+ * the multipart boundary itself — but shares the same 401 handling and error
+ * envelope parsing.
+ */
+export async function requestUpload<T>(path: string, form: FormData, method = 'PUT'): Promise<T> {
+  const res = await fetch(path, { method, credentials: 'include', body: form })
+
+  if (res.ok) {
+    const text = await res.text()
+    return text === '' ? (undefined as T) : (JSON.parse(text) as T)
+  }
+
+  let code = 'unknown_error'
+  let message = `Request failed with status ${res.status}`
+  try {
+    const envelope = (await res.json()) as ErrorEnvelope
+    if (typeof envelope.error === 'string') code = envelope.error
+    if (typeof envelope.message === 'string') message = envelope.message
+  } catch {
+    // Non-JSON error body; keep the fallback values.
+  }
+
+  if (res.status === 401 && unauthorizedHandler !== null) {
+    unauthorizedHandler()
+  }
+  throw new ApiError(res.status, code, message)
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, skipUnauthorizedHandler = false } = options
 

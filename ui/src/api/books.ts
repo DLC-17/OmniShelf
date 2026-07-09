@@ -21,6 +21,23 @@ export interface TrackingItem {
   updatedAt: string
 }
 
+/** One work from GET /api/books/search (matches api.bookSearchResult). */
+export interface BookSearchResult {
+  workKey: string
+  title: string
+  authors: string
+  /** First publication year, or 0 when OpenLibrary has no date. */
+  firstYear: number
+  editionCount: number
+}
+
+/** One ISBN-bearing edition from GET /api/books/editions. */
+export interface BookEdition {
+  isbn13: string
+  title: string
+  publishDate: string
+}
+
 /** Tracking statuses a book may take. */
 export type BookStatus = 'READING' | 'PLAN_TO' | 'COMPLETED'
 
@@ -43,4 +60,20 @@ export function trackBook(bookId: number, status: BookStatus): Promise<TrackingI
     method: 'POST',
     body: { bookId, status },
   })
+}
+
+/** Search OpenLibrary for works by title (add-by-name flow). */
+export async function searchBooks(query: string): Promise<BookSearchResult[]> {
+  const res = await request<{ results: BookSearchResult[] }>(
+    `/api/books/search?q=${encodeURIComponent(query)}`,
+  )
+  return res.results
+}
+
+/** List the ISBN-bearing editions of a work so the user can pick which to track. */
+export async function listEditions(workKey: string): Promise<BookEdition[]> {
+  const res = await request<{ editions: BookEdition[] }>(
+    `/api/books/editions?workKey=${encodeURIComponent(workKey)}`,
+  )
+  return res.editions
 }

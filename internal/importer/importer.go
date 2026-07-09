@@ -95,6 +95,11 @@ type Importer struct {
 	skipped map[uint]int
 	current map[uint]string                    // jobID → title currently being imported
 	pending map[uint]map[string][]pendingWatch // jobID → normalized title → rows
+	// movieUnresolved records which of a job's unresolved titles are movies
+	// (jobID → normalized title → true), so manual resolution maps them to a
+	// TMDB movie rather than a TV show. Like skipped/pending it is in-memory
+	// only and does not survive a restart (documented recovery: re-upload).
+	movieUnresolved map[uint]map[string]bool
 }
 
 // pendingWatch is a seen-episode row waiting for its title to be resolved.
@@ -114,9 +119,10 @@ func New(cfg Config) *Importer {
 		imageBaseURL: cfg.ImageBaseURL,
 		lockRetry:    cfg.LockRetry,
 		lockWait:     cfg.LockWait,
-		skipped:      make(map[uint]int),
-		current:      make(map[uint]string),
-		pending:      make(map[uint]map[string][]pendingWatch),
+		skipped:         make(map[uint]int),
+		current:         make(map[uint]string),
+		pending:         make(map[uint]map[string][]pendingWatch),
+		movieUnresolved: make(map[uint]map[string]bool),
 	}
 	if imp.httpClient == nil {
 		imp.httpClient = &http.Client{Timeout: 15 * time.Second}
@@ -193,6 +199,21 @@ func (imp *Importer) setCurrent(jobID uint, title string) {
 	imp.mu.Unlock()
 }
 
+// isMovieUnresolved reports whether a job's unresolved title (normalized) was
+// recorded as a movie, so manual resolution imports it as a TMDB movie.
+func (imp *Importer) isMovieUnresolved(jobID uint, norm string) bool {
+	imp.mu.Lock()
+	defer imp.mu.Unlock()
+	return imp.movieUnresolved[jobID][norm]
+}
+
+// clearMovieUnresolved forgets a resolved movie's unresolved tag.
+func (imp *Importer) clearMovieUnresolved(jobID uint, norm string) {
+	imp.mu.Lock()
+	defer imp.mu.Unlock()
+	delete(imp.movieUnresolved[jobID], norm)
+}
+
 // Resolve imports the shows the user manually mapped (title → TMDB ID),
 // replays any seen-episode rows held for those titles, and removes them from
 // the job's unresolved list.
@@ -218,6 +239,30 @@ func (imp *Importer) Resolve(jobID, userID uint, mappings map[string]int) (*mode
 
 	for title, tmdbID := range mappings {
 		norm := normalizeTitle(title)
+
+		// A title recorded as an unresolved movie maps to a TMDB movie, not a
+		// show: fetch it, upsert the Movie cache and the user's COMPLETED
+		// tracking item, then drop it from the unresolved list.
+		if imp.isMovieUnresolved(jobID, norm) {
+			detail, err := imp.tmdb.GetMovie(ctx, tmdbID)
+			if err != nil {
+				imp.saveUnresolved(job, unresolved)
+				return nil, fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
+			}
+			movie, err := imp.upsertMovie(ctx, detail.ID, detail.Title, detail.Overview, detail.ReleaseDate, detail.PosterPath)
+			if err != nil {
+				imp.saveUnresolved(job, unresolved)
+				return nil, err
+			}
+			if err := imp.ensureMovieTracking(userID, movie); err != nil {
+				imp.saveUnresolved(job, unresolved)
+				return nil, err
+			}
+			unresolved = removeTitle(unresolved, norm)
+			imp.clearMovieUnresolved(jobID, norm)
+			continue
+		}
+
 		show, epIDs, err := imp.importShow(ctx, tmdbID)
 		if err != nil {
 			// Persist what already succeeded before surfacing the failure.
@@ -269,6 +314,8 @@ type runState struct {
 	jobID      uint
 	userID     uint
 	cache      map[string]*resolvedShow  // normalized title → show (nil = unresolvable)
+	movieCache map[string]int            // normalized movie title → TMDB id (0 = unresolvable)
+	movies     map[string]bool           // normalized title → true when the unresolved entry is a movie
 	unresolved []string                  // original titles, first-seen order
 	pending    map[string][]pendingWatch // normalized title → held watch rows
 	skipped    int
@@ -307,10 +354,12 @@ func (imp *Importer) run(jobID, userID uint, p *Payload) {
 
 	ctx := context.Background()
 	st := &runState{
-		jobID:   jobID,
-		userID:  userID,
-		cache:   make(map[string]*resolvedShow),
-		pending: make(map[string][]pendingWatch),
+		jobID:      jobID,
+		userID:     userID,
+		cache:      make(map[string]*resolvedShow),
+		movieCache: make(map[string]int),
+		movies:     make(map[string]bool),
+		pending:    make(map[string][]pendingWatch),
 	}
 	// Clear the "currently importing" label once the run ends, however it ends.
 	defer imp.setCurrent(jobID, "")
@@ -335,6 +384,7 @@ func (imp *Importer) run(jobID, userID uint, p *Payload) {
 	imp.mu.Lock()
 	imp.skipped[jobID] = st.skipped
 	imp.pending[jobID] = st.pending
+	imp.movieUnresolved[jobID] = st.movies
 	imp.mu.Unlock()
 
 	if err := imp.db.Model(&models.ImportJob{}).Where("id = ?", jobID).
@@ -351,6 +401,16 @@ func (imp *Importer) run(jobID, userID uint, p *Payload) {
 // counted (E9); titles TMDB cannot match go to the unresolved bucket, along
 // with their watch rows (E8). Only database errors abort the job.
 func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string, st *runState) error {
+	// TV Time's unified export mixes movie watch records in among the series
+	// and episode rows; a populated movie-name column is the signal. Route
+	// those to the movie path before the title check, since a movie row has no
+	// series title.
+	if f.movieNameIdx >= 0 {
+		if name := fieldAt(rec, f.movieNameIdx); name != "" {
+			return imp.importMovieRow(ctx, f, rec, name, st)
+		}
+	}
+
 	title := fieldAt(rec, f.titleIdx)
 	if title == "" {
 		st.skipped++
@@ -568,6 +628,105 @@ func (imp *Importer) importBookRow(f *parsedFile, rec []string, st *runState) er
 		"progress": progress,
 	}).FirstOrCreate(&item).Error; err != nil {
 		return fmt.Errorf("upserting book tracking item %s: %w", isbn13, err)
+	}
+	return nil
+}
+
+// importMovieRow imports one movie watch record from TV Time's unified export.
+// The movie is matched to TMDB by name (its release year breaks ties), then the
+// shared Movie cache and the user's COMPLETED MOVIE tracking item are upserted.
+// A movie TMDB cannot match lands in the unresolved bucket tagged as a movie, so
+// manual resolution maps it to a TMDB movie rather than a show. Per-run caching
+// means each distinct movie is searched at most once.
+func (imp *Importer) importMovieRow(ctx context.Context, f *parsedFile, rec []string, name string, st *runState) error {
+	imp.setCurrent(st.jobID, name)
+	norm := normalizeTitle(name)
+	if norm == "" {
+		st.skipped++
+		return nil
+	}
+	if _, seen := st.movieCache[norm]; seen {
+		return nil // already handled (resolved or unresolved) this run
+	}
+
+	release := fieldAt(rec, f.releaseDateIdx)
+	movie, ok := imp.resolveMovie(ctx, name, release)
+	if !ok {
+		st.movieCache[norm] = 0
+		st.unresolved = append(st.unresolved, name)
+		st.movies[norm] = true
+		return nil
+	}
+	st.movieCache[norm] = movie.TMDBID
+	return imp.ensureMovieTracking(st.userID, movie)
+}
+
+// resolveMovie matches a movie title against TMDB (exact title, release-year
+// tiebreak, then fuzzy above threshold) and upserts the shared Movie cache on a
+// hit. A TMDB error or no-match returns (nil, false) so the caller can record
+// the title as unresolved rather than failing the job.
+func (imp *Importer) resolveMovie(ctx context.Context, name, releaseDate string) (*models.Movie, bool) {
+	sr, err := imp.tmdb.SearchMovie(ctx, name)
+	if err != nil {
+		log.Printf("importer: movie search %q: %v", name, err)
+		return nil, false
+	}
+	match := chooseMovieMatch(name, movieYear(releaseDate), sr.Results)
+	if match == nil {
+		return nil, false
+	}
+	movie, err := imp.upsertMovie(ctx, match.ID, match.Title, match.Overview, match.ReleaseDate, match.PosterPath)
+	if err != nil {
+		log.Printf("importer: upsert movie %q (%d): %v", name, match.ID, err)
+		return nil, false
+	}
+	return movie, true
+}
+
+// upsertMovie creates or refreshes the shared Movie cache row for a TMDB id and
+// best-effort caches its poster (a poster failure never fails the import).
+func (imp *Importer) upsertMovie(ctx context.Context, tmdbID int, title, overview, releaseDate, posterPath string) (*models.Movie, error) {
+	var movie models.Movie
+	err := imp.db.Where(&models.Movie{TMDBID: tmdbID}).
+		Assign(map[string]any{
+			"title":          title,
+			"overview":       overview,
+			"release_date":   releaseDate,
+			"last_synced_at": time.Now(),
+		}).
+		FirstOrCreate(&movie).Error
+	if err != nil {
+		return nil, fmt.Errorf("upserting movie %d: %w", tmdbID, err)
+	}
+
+	if imp.images != nil && posterPath != "" && movie.PosterPath == "" {
+		rel, err := imp.images.Fetch(ctx, imp.httpClient, imp.imageBaseURL+posterPath, "movie", strconv.Itoa(tmdbID))
+		if err != nil {
+			log.Printf("importer: poster for movie %d: %v", tmdbID, err)
+		} else if err := imp.db.Model(&movie).Update("poster_path", rel).Error; err != nil {
+			return nil, fmt.Errorf("saving poster path for movie %d: %w", tmdbID, err)
+		} else {
+			movie.PosterPath = rel
+		}
+	}
+	return &movie, nil
+}
+
+// ensureMovieTracking upserts the user's MOVIE tracking item against the
+// idx_user_media unique index. A watched movie is COMPLETED; an existing row
+// (any status) is left as-is so a re-import never clobbers the user's status.
+func (imp *Importer) ensureMovieTracking(userID uint, movie *models.Movie) error {
+	item := models.TrackingItem{}
+	err := imp.db.Where(&models.TrackingItem{
+		UserID:     userID,
+		Type:       "MOVIE",
+		ExternalID: strconv.Itoa(movie.TMDBID),
+	}).Attrs(map[string]any{
+		"title":  movie.Title,
+		"status": "COMPLETED",
+	}).FirstOrCreate(&item).Error
+	if err != nil {
+		return fmt.Errorf("upserting tracking item for movie %d: %w", movie.TMDBID, err)
 	}
 	return nil
 }
