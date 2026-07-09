@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ApiError } from '../api/client'
 import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
+import LibraryToolbar, { applyLibrarySearch } from '../components/library/LibraryToolbar'
+import type { FilterState } from '../components/library/LibraryToolbar'
 import MovieSearch from '../components/movies/MovieSearch'
 import Poster from '../components/tv/Poster'
 import { BookScan, GameScan } from './Scan'
@@ -46,6 +48,9 @@ export default function Library() {
   const [media, setMedia] = useState<MediaType>('TV')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [collapsed, setCollapsed] = useState<Set<ItemStatus>>(new Set())
+  // Per-tab library search + filters, applied client-side to the loaded items.
+  const [search, setSearch] = useState('')
+  const [filters, setFilters] = useState<FilterState>({})
 
   const toggleSection = (status: ItemStatus) =>
     setCollapsed((prev) => {
@@ -58,6 +63,10 @@ export default function Library() {
   const library = useLibrary({ type: media })
 
   const items: LibraryItem[] = library.data ?? []
+  const visible = useMemo(
+    () => applyLibrarySearch(items, search, filters, media),
+    [items, search, filters, media],
+  )
   const selected = items.find((i) => i.id === selectedId) ?? null
 
   return (
@@ -101,12 +110,25 @@ export default function Library() {
             onClick={() => {
               setMedia(tab.value)
               setSelectedId(null)
+              setSearch('')
+              setFilters({})
             }}
           >
             {tab.label}
           </button>
         ))}
       </div>
+
+      {items.length > 0 && (
+        <LibraryToolbar
+          media={media}
+          items={items}
+          search={search}
+          onSearchChange={setSearch}
+          filters={filters}
+          onFiltersChange={setFilters}
+        />
+      )}
 
       {library.isPending && <p className="muted">Loading your library…</p>}
       {library.isError && (
@@ -126,9 +148,13 @@ export default function Library() {
       )}
       
 
-      {items.length > 0 &&
+      {items.length > 0 && visible.length === 0 && (
+        <p className="empty">No items match your search or filters.</p>
+      )}
+
+      {visible.length > 0 &&
         sectionsFor(media).map(({ status, label }) => {
-          const sectionItems = items.filter((i) => i.status === status)
+          const sectionItems = visible.filter((i) => i.status === status)
           if (sectionItems.length === 0) return null
           const open = !collapsed.has(status)
           return (

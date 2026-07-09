@@ -434,6 +434,75 @@ button:disabled {
   min-width: 14rem;
 }
 
+/* Per-tab library search + filter dropdown */
+.library-toolbar {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 0 0 1.15rem;
+}
+.library-search {
+  flex: 1;
+  min-width: 14rem;
+}
+.filter-dropdown {
+  position: relative;
+}
+.filter-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.filter-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 6;
+  min-width: 15rem;
+  max-height: 20rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.9rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+.filter-group legend {
+  padding: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+.filter-option input[type='checkbox'] {
+  width: auto;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.filter-clear {
+  align-self: flex-start;
+}
+
 /* ---------- Feedback ---------- */
 
 .alert {
