@@ -25,6 +25,7 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
+	"github.com/davidlc1229/omnishelf/internal/ownership"
 	"github.com/davidlc1229/omnishelf/internal/tags"
 )
 
@@ -314,6 +315,7 @@ type LibraryEntry struct {
 	Description string   // books only
 	Platform    string   // games only
 	Tags        []string // source-derived tags/keywords; never nil (empty when none)
+	Ownership   []string // user-selected ownership formats (games only); never nil
 }
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
@@ -399,7 +401,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	tagIDsByType := map[string][]uint{}
 	for i := range items {
 		it := items[i]
-		entry := LibraryEntry{Item: it, Tags: []string{}}
+		entry := LibraryEntry{Item: it, Tags: []string{}, Ownership: []string{}}
 		switch it.Type {
 		case TypeTV:
 			if sh, ok := shows[it.ExternalID]; ok {
@@ -455,6 +457,28 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			}
 		}
 	}
+
+	// Attach user-selected ownership formats. Unlike tags (keyed by the shared
+	// cache row), ownership is per tracking item, so it batches by TrackingItem.ID
+	// and needs no cache-row join. Only media types with a fixed format set carry
+	// ownership; today that is GAME (#11 adds MUSIC).
+	gameItemIDs := make([]uint, 0)
+	for i := range out {
+		if out[i].Item.Type == TypeGame {
+			gameItemIDs = append(gameItemIDs, out[i].Item.ID)
+		}
+	}
+	if len(gameItemIDs) > 0 {
+		byItem, err := ownership.NewStore(s.db).ForItems(ctx, ownership.TypeGame, gameItemIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if formats, ok := byItem[out[i].Item.ID]; ok {
+				out[i].Ownership = formats
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -500,6 +524,32 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 	return item, nil
 }
 
+// SetOwnership replaces the ownership formats on the user's tracked item and
+// returns the normalized set (canonical order). Ownership is only defined for
+// media types with a fixed format set (games: Physical, GOG); an item of any
+// other type, or a format outside the set, yields ownership.ErrInvalidFormat.
+// The item is scoped to userID exactly like UpdateItem, so another user's item
+// surfaces as ErrItemNotFound.
+func (s *Service) SetOwnership(ctx context.Context, userID, itemID uint, formats []string) ([]string, error) {
+	item, err := s.userItem(ctx, userID, itemID)
+	if err != nil {
+		return nil, err
+	}
+	store := ownership.NewStore(s.db)
+	if err := store.Set(ctx, item.Type, item.ID, formats); err != nil {
+		return nil, err
+	}
+	byItem, err := store.ForItems(ctx, item.Type, []uint{item.ID})
+	if err != nil {
+		return nil, err
+	}
+	out := byItem[item.ID]
+	if out == nil {
+		out = []string{} // never nil, so the handler serializes [] not null
+	}
+	return out, nil
+}
+
 // DeleteItem untracks an item for the user. For TV items the
 // user's EpisodeWatch rows for that show are removed too; shared Show, Book,
 // and Episode metadata is always kept.
@@ -522,6 +572,12 @@ func (s *Service) DeleteItem(ctx context.Context, userID, itemID uint) error {
 				Delete(&models.BookNote{}).Error; err != nil {
 				return fmt.Errorf("deleting notes for item %d: %w", item.ID, err)
 			}
+		}
+		// Ownership rows are keyed by this tracking item; drop them so a later
+		// item reusing the id never inherits stale formats.
+		if err := tx.Where("media_type = ? AND item_id = ?", item.Type, item.ID).
+			Delete(&models.OwnershipFormat{}).Error; err != nil {
+			return fmt.Errorf("deleting ownership for item %d: %w", item.ID, err)
 		}
 		if err := tx.Delete(&models.TrackingItem{}, item.ID).Error; err != nil {
 			return fmt.Errorf("deleting item %d: %w", item.ID, err)

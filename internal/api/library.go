@@ -10,6 +10,7 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/books"
 	"github.com/davidlc1229/omnishelf/internal/models"
+	"github.com/davidlc1229/omnishelf/internal/ownership"
 )
 
 // libraryHandler serves the unified shelf endpoints:
@@ -24,6 +25,7 @@ func RegisterLibraryRoutes(grp *gin.RouterGroup, svc *books.Service) {
 	h := &libraryHandler{svc: svc}
 	grp.GET("/library", h.list)
 	grp.PATCH("/items/:id", h.update)
+	grp.PUT("/items/:id/ownership", h.setOwnership)
 	grp.DELETE("/items/:id", h.remove)
 }
 
@@ -44,7 +46,8 @@ type itemResponse struct {
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
 	Platform    string    `json:"platform"`
-	Tags        []string  `json:"tags"` // source-derived tags/keywords; [] when none
+	Tags        []string  `json:"tags"`      // source-derived tags/keywords; [] when none
+	Ownership   []string  `json:"ownership"` // user-selected ownership formats (games); [] when none
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
@@ -58,6 +61,7 @@ func toItemResponse(item *models.TrackingItem) itemResponse {
 		Progress:   item.Progress,
 		Rating:     item.Rating,
 		Tags:       []string{}, // never null; overwritten with the real set for library rows
+		Ownership:  []string{}, // never null; overwritten with the real set for library rows
 		UpdatedAt:  item.UpdatedAt,
 	}
 }
@@ -72,6 +76,9 @@ func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r.Platform = e.Platform
 	if e.Tags != nil {
 		r.Tags = e.Tags
+	}
+	if e.Ownership != nil {
+		r.Ownership = e.Ownership
 	}
 	return r
 }
@@ -131,6 +138,38 @@ func (h *libraryHandler) update(c *gin.Context) {
 		Error(c, http.StatusInternalServerError, CodeInternal, "updating item failed")
 	default:
 		c.JSON(http.StatusOK, toItemResponse(item))
+	}
+}
+
+// ownershipRequest is the PUT /items/:id/ownership body: the full replacement
+// set of ownership formats (multi-select). An empty array clears ownership.
+type ownershipRequest struct {
+	Formats []string `json:"formats"`
+}
+
+// setOwnership handles PUT /api/items/:id/ownership {formats: []}. It replaces
+// the tracked item's ownership formats and returns the normalized set.
+func (h *libraryHandler) setOwnership(c *gin.Context) {
+	itemID, ok := itemIDParam(c)
+	if !ok {
+		return
+	}
+	var req ownershipRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with a formats array")
+		return
+	}
+
+	formats, err := h.svc.SetOwnership(c.Request.Context(), CurrentUserID(c), itemID, req.Formats)
+	switch {
+	case errors.Is(err, ownership.ErrInvalidFormat):
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "formats must be a subset of the allowed set for this item's type (games: Physical, GOG)")
+	case errors.Is(err, books.ErrItemNotFound):
+		Error(c, http.StatusNotFound, CodeNotFound, "tracking item not found")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "updating ownership failed")
+	default:
+		c.JSON(http.StatusOK, gin.H{"ownership": formats})
 	}
 }
 

@@ -128,6 +128,26 @@ type MediaTag struct {
 	MediaID   uint   `gorm:"not null;uniqueIndex:idx_media_tag;index:idx_media_lookup"`
 }
 
+// OwnershipFormat records that a tracked item is owned in a particular format,
+// e.g. a game owned Physical and/or on GOG. It is a GENERIC, media-type-agnostic
+// store (like MediaTag): MediaType mirrors TrackingItem.Type ("GAME", and later
+// "MUSIC") and ItemID is the TrackingItem primary key — ownership is a per-user
+// fact about a tracked copy, NOT shared metadata, so it keys off the tracking
+// item, not the shared cache row.
+//
+// Ownership is a multi-select over a FIXED option set per media type (games:
+// Physical, GOG), so one item may have several rows. The composite unique index
+// (media_type, item_id, format) makes each (item, format) pair appear at most
+// once; the (media_type, item_id) lookup index makes "formats for this item"
+// cheap for the library DTO batch read. Allowed values are validated in the
+// ownership service, not the schema.
+type OwnershipFormat struct {
+	ID        uint   `gorm:"primaryKey"`
+	MediaType string `gorm:"type:varchar(10);not null;uniqueIndex:idx_ownership_format;index:idx_ownership_lookup"`
+	ItemID    uint   `gorm:"not null;uniqueIndex:idx_ownership_format;index:idx_ownership_lookup"`
+	Format    string `gorm:"not null;uniqueIndex:idx_ownership_format"`
+}
+
 // ShowAlias remembers that an imported (normalized) series title resolved to a
 // TMDB id, so future imports of the same title skip the TMDB search entirely.
 type ShowAlias struct {
@@ -202,5 +222,6 @@ func All() []any {
 		&Tag{},
 		&MediaTag{},
 		&BookNote{},
+		&OwnershipFormat{},
 	}
 }
