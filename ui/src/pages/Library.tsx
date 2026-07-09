@@ -154,6 +154,9 @@ export default function Library() {
                       >
                         <Poster posterPath={item.artworkPath} title={item.title} width={140} height={210} />
                         <span className="cover-title">{item.title}</span>
+                        {item.type === 'BOOK' && item.pageCount > 0 && (
+                          <span className="meta">{item.pageCount} pages</span>
+                        )}
                       </button>
                     </li>
                   ))}
