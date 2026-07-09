@@ -91,10 +91,11 @@ type Importer struct {
 	lockRetry    time.Duration
 	lockWait     time.Duration
 
-	mu      sync.Mutex
-	skipped map[uint]int
-	current map[uint]string                    // jobID → title currently being imported
-	pending map[uint]map[string][]pendingWatch // jobID → normalized title → rows
+	mu           sync.Mutex
+	skipped      map[uint]int
+	notesCreated map[uint]int                       // jobID → book notes created (notes import)
+	current      map[uint]string                    // jobID → title currently being imported
+	pending      map[uint]map[string][]pendingWatch // jobID → normalized title → rows
 	// movieUnresolved records which of a job's unresolved titles are movies
 	// (jobID → normalized title → true), so manual resolution maps them to a
 	// TMDB movie rather than a TV show. Like skipped/pending it is in-memory
@@ -120,6 +121,7 @@ func New(cfg Config) *Importer {
 		lockRetry:    cfg.LockRetry,
 		lockWait:     cfg.LockWait,
 		skipped:         make(map[uint]int),
+		notesCreated:    make(map[uint]int),
 		current:         make(map[uint]string),
 		pending:         make(map[uint]map[string][]pendingWatch),
 		movieUnresolved: make(map[uint]map[string]bool),
@@ -191,6 +193,15 @@ func (imp *Importer) CurrentItem(jobID uint) string {
 	imp.mu.Lock()
 	defer imp.mu.Unlock()
 	return imp.current[jobID]
+}
+
+// NotesCreated returns how many book notes a finished notes-import job wrote
+// (0 for TV/library jobs). Like the skip count it lives in memory only, so it
+// reads 0 after a restart.
+func (imp *Importer) NotesCreated(jobID uint) int {
+	imp.mu.Lock()
+	defer imp.mu.Unlock()
+	return imp.notesCreated[jobID]
 }
 
 func (imp *Importer) setCurrent(jobID uint, title string) {
@@ -320,6 +331,10 @@ type runState struct {
 	pending    map[string][]pendingWatch // normalized title → held watch rows
 	skipped    int
 	processed  int
+	// Notes import only: the caller's tracked books, indexed for matching, and
+	// the running count of notes created.
+	books        *bookIndex
+	notesCreated int
 }
 
 // run processes an import job in a background goroutine, guarded by
@@ -383,6 +398,7 @@ func (imp *Importer) run(jobID, userID uint, p *Payload) {
 
 	imp.mu.Lock()
 	imp.skipped[jobID] = st.skipped
+	imp.notesCreated[jobID] = st.notesCreated
 	imp.pending[jobID] = st.pending
 	imp.movieUnresolved[jobID] = st.movies
 	imp.mu.Unlock()
@@ -422,6 +438,9 @@ func (imp *Importer) processRow(ctx context.Context, f *parsedFile, rec []string
 	switch f.kind {
 	case kindGoodreads:
 		return imp.importBookRow(f, rec, st)
+
+	case kindGoodreadsNotes:
+		return imp.importNoteRow(f, rec, st)
 
 	case kindFollowed:
 		rs, ok := imp.resolveTitle(ctx, title, st)
@@ -758,6 +777,176 @@ func mapShelfStatus(shelf string) string {
 	default:
 		return "READING"
 	}
+}
+
+// importNoteRow maps one Goodreads row's My Review to a BookNote on the user's
+// matching tracked BOOK item. Rows without a review are skipped and counted;
+// reviewed rows whose book the user does not track land in the unresolved
+// bucket (reported as skipped-unmatched). Importing new books is out of scope —
+// this only annotates books already on the shelf.
+func (imp *Importer) importNoteRow(f *parsedFile, rec []string, st *runState) error {
+	review := fieldAt(rec, f.reviewIdx)
+	if review == "" {
+		st.skipped++ // rows without a review produce no note
+		return nil
+	}
+
+	if st.books == nil {
+		idx, err := imp.loadBookIndex(st.userID)
+		if err != nil {
+			return err
+		}
+		st.books = idx
+	}
+
+	item, ok := st.books.match(f, rec)
+	if !ok {
+		// The reviewed book is not tracked; surface its title so the user can
+		// see which reviews were not imported.
+		st.unresolved = append(st.unresolved, fieldAt(rec, f.titleIdx))
+		return nil
+	}
+
+	// Backdate to Date Read, then Date Added, then fall back to now.
+	createdAt := parseGoodreadsDate(fieldAt(rec, f.dateReadIdx))
+	if createdAt.IsZero() {
+		createdAt = parseGoodreadsDate(fieldAt(rec, f.dateAddedIdx))
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+
+	// Dedupe: an identical note body already on the item means this review was
+	// imported before, so re-imports create no duplicates.
+	var existing int64
+	if err := imp.db.Model(&models.BookNote{}).
+		Where("user_id = ? AND item_id = ? AND body = ?", st.userID, item.ID, review).
+		Count(&existing).Error; err != nil {
+		return fmt.Errorf("checking existing note for item %d: %w", item.ID, err)
+	}
+	if existing > 0 {
+		return nil
+	}
+
+	note := models.BookNote{
+		UserID:    st.userID,
+		ItemID:    item.ID,
+		Body:      review,
+		CreatedAt: createdAt, // GORM keeps a non-zero CreatedAt (backdated)
+	}
+	if err := imp.db.Create(&note).Error; err != nil {
+		return fmt.Errorf("creating note for item %d: %w", item.ID, err)
+	}
+	st.notesCreated++
+	return nil
+}
+
+// bookIndex indexes a user's tracked BOOK items for matching Goodreads rows:
+// by ISBN-13 (the item's external id) first, then normalized title+author,
+// then normalized title alone.
+type bookIndex struct {
+	byISBN        map[string]models.TrackingItem
+	byTitleAuthor map[string]models.TrackingItem
+	byTitle       map[string]models.TrackingItem
+}
+
+// loadBookIndex builds the match index from the user's BOOK tracking items,
+// joining the shared Book cache for author strings.
+func (imp *Importer) loadBookIndex(userID uint) (*bookIndex, error) {
+	var items []models.TrackingItem
+	if err := imp.db.Where("user_id = ? AND type = ?", userID, "BOOK").Find(&items).Error; err != nil {
+		return nil, fmt.Errorf("loading tracked books for user %d: %w", userID, err)
+	}
+
+	// Author strings live on the shared Book cache, keyed by ISBN-13.
+	isbns := make([]string, 0, len(items))
+	for _, it := range items {
+		isbns = append(isbns, it.ExternalID)
+	}
+	authorByISBN := make(map[string]string, len(items))
+	if len(isbns) > 0 {
+		var books []models.Book
+		if err := imp.db.Select("isbn13", "authors").Where("isbn13 IN ?", isbns).Find(&books).Error; err != nil {
+			return nil, fmt.Errorf("loading book authors: %w", err)
+		}
+		for _, b := range books {
+			authorByISBN[b.ISBN13] = b.Authors
+		}
+	}
+
+	idx := &bookIndex{
+		byISBN:        make(map[string]models.TrackingItem, len(items)),
+		byTitleAuthor: make(map[string]models.TrackingItem, len(items)),
+		byTitle:       make(map[string]models.TrackingItem, len(items)),
+	}
+	for _, it := range items {
+		idx.byISBN[it.ExternalID] = it
+		nt := normalizeTitle(it.Title)
+		if nt == "" {
+			continue
+		}
+		// First writer wins so an ambiguous later title cannot displace an
+		// earlier item.
+		if _, seen := idx.byTitle[nt]; !seen {
+			idx.byTitle[nt] = it
+		}
+		if a := normalizeTitle(authorByISBN[it.ExternalID]); a != "" {
+			key := nt + "|" + a
+			if _, seen := idx.byTitleAuthor[key]; !seen {
+				idx.byTitleAuthor[key] = it
+			}
+		}
+	}
+	return idx, nil
+}
+
+// match resolves a Goodreads row to a tracked BOOK item: ISBN-13 (from the
+// ISBN13 column, falling back to a 13-digit ISBN column) wins; otherwise a
+// normalized title+author match; otherwise a normalized title alone.
+func (bi *bookIndex) match(f *parsedFile, rec []string) (models.TrackingItem, bool) {
+	isbn13 := cleanISBN(fieldAt(rec, f.isbn13Idx))
+	if len(isbn13) != 13 {
+		if alt := cleanISBN(fieldAt(rec, f.isbnIdx)); len(alt) == 13 {
+			isbn13 = alt
+		}
+	}
+	if len(isbn13) == 13 {
+		if it, ok := bi.byISBN[isbn13]; ok {
+			return it, true
+		}
+	}
+
+	nt := normalizeTitle(fieldAt(rec, f.titleIdx))
+	if nt == "" {
+		return models.TrackingItem{}, false
+	}
+	if a := normalizeTitle(fieldAt(rec, f.authorIdx)); a != "" {
+		if it, ok := bi.byTitleAuthor[nt+"|"+a]; ok {
+			return it, true
+		}
+	}
+	if it, ok := bi.byTitle[nt]; ok {
+		return it, true
+	}
+	return models.TrackingItem{}, false
+}
+
+// goodreadsDateFormats are the layouts Goodreads uses for Date Read / Date
+// Added; the slash form is the common export shape.
+var goodreadsDateFormats = []string{
+	"2006/01/02",
+	"2006-01-02",
+}
+
+// parseGoodreadsDate parses a Goodreads date cell, returning the zero time when
+// it is empty or unparseable so the caller can fall back to the next source.
+func parseGoodreadsDate(s string) time.Time {
+	for _, layout := range goodreadsDateFormats {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
 }
 
 // loadEpisodeIDs builds the (season, number) → episode-ID lookup for a cached

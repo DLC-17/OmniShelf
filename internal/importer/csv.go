@@ -44,15 +44,32 @@ var (
 	// TMDB match when a title is ambiguous.
 	movieNameHeaders   = []string{"movie_name", "movie_title", "film_name"}
 	releaseDateHeaders = []string{"release_date"}
+
+	// Goodreads review + date columns, consumed only by the notes import
+	// (My Review → BookNote, Date Read/Added → the note's CreatedAt).
+	reviewHeaders    = []string{"my_review", "review"}
+	dateReadHeaders  = []string{"date_read"}
+	dateAddedHeaders = []string{"date_added"}
 )
 
 // fileKind classifies a recognized CSV.
 type fileKind int
 
 const (
-	kindFollowed  fileKind = iota // followed_shows.csv shape (TV)
-	kindSeen                      // seen_episodes.csv shape (TV)
-	kindGoodreads                 // Goodreads library export (books)
+	kindFollowed       fileKind = iota // followed_shows.csv shape (TV)
+	kindSeen                           // seen_episodes.csv shape (TV)
+	kindGoodreads                      // Goodreads library export → books + tracking
+	kindGoodreadsNotes                 // Goodreads library export → notes on tracked books
+)
+
+// parseMode selects how a recognized Goodreads export is classified. The same
+// export file drives two very different imports, so the intent comes from the
+// endpoint (library vs. notes), not from the file's shape.
+type parseMode int
+
+const (
+	modeLibrary parseMode = iota // TV Time + Goodreads library (books)
+	modeNotes                    // Goodreads My Review → BookNote
 )
 
 // UploadFile is one file received in the multipart upload (or extracted from
@@ -84,7 +101,11 @@ type parsedFile struct {
 	// Movie column indices for TV Time's unified export; -1 when absent.
 	movieNameIdx   int
 	releaseDateIdx int
-	records        [][]string
+	// Goodreads notes-import column indices; -1 when absent.
+	reviewIdx    int
+	dateReadIdx  int
+	dateAddedIdx int
+	records      [][]string
 }
 
 // Payload is a fully classified upload ready for background processing.
@@ -106,10 +127,22 @@ func validationErrorf(format string, args ...any) *ValidationError {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
 }
 
-// ParseUpload validates and classifies the uploaded files. Zip archives are
-// expanded and their .csv entries parsed. It returns a *ValidationError when
-// no file has a recognizable TV Time header row.
+// ParseUpload validates and classifies a TV Time / Goodreads-library upload.
+// Zip archives are expanded and their .csv entries parsed. It returns a
+// *ValidationError when no file has a recognizable header row.
 func ParseUpload(files []UploadFile) (*Payload, error) {
+	return parseUpload(files, modeLibrary)
+}
+
+// ParseNotesUpload validates and classifies a Goodreads library export for the
+// notes import: every recognized Goodreads file is classified as
+// kindGoodreadsNotes so its My Review column becomes book notes instead of new
+// tracking items. TV Time files are rejected up front.
+func ParseNotesUpload(files []UploadFile) (*Payload, error) {
+	return parseUpload(files, modeNotes)
+}
+
+func parseUpload(files []UploadFile, mode parseMode) (*Payload, error) {
 	var csvs []UploadFile
 	for _, f := range files {
 		if isZip(f) {
@@ -128,7 +161,7 @@ func ParseUpload(files []UploadFile) (*Payload, error) {
 
 	p := &Payload{}
 	for _, f := range csvs {
-		pf, err := parseCSV(f)
+		pf, err := parseCSV(f, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -179,10 +212,11 @@ func extractZip(f UploadFile) ([]UploadFile, error) {
 	return out, nil
 }
 
-// parseCSV validates the header row and reads all data records. Records that
-// fail CSV parsing are kept as empty records so the background job counts
-// them as skipped malformed rows while Total stays accurate.
-func parseCSV(f UploadFile) (*parsedFile, error) {
+// parseCSV validates the header row and classifies the file for the given
+// mode, then reads all data records via finishParse. modeNotes accepts only
+// Goodreads exports (classified kindGoodreadsNotes); modeLibrary accepts TV
+// Time and Goodreads-library shapes.
+func parseCSV(f UploadFile, mode parseMode) (*parsedFile, error) {
 	r := csv.NewReader(bytes.NewReader(f.Data))
 	r.FieldsPerRecord = -1
 	r.LazyQuotes = true
@@ -196,6 +230,7 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 		name: f.Name, titleIdx: -1, watchedIdx: -1,
 		authorIdx: -1, isbn13Idx: -1, isbnIdx: -1, shelfIdx: -1, pagesIdx: -1,
 		movieNameIdx: -1, releaseDateIdx: -1,
+		reviewIdx: -1, dateReadIdx: -1, dateAddedIdx: -1,
 	}
 	for i, h := range header {
 		switch n := normalizeHeader(h); {
@@ -221,7 +256,24 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 			pf.movieNameIdx = i
 		case pf.releaseDateIdx < 0 && matchesHeader(n, releaseDateHeaders):
 			pf.releaseDateIdx = i
+		case pf.reviewIdx < 0 && matchesHeader(n, reviewHeaders):
+			pf.reviewIdx = i
+		case pf.dateReadIdx < 0 && matchesHeader(n, dateReadHeaders):
+			pf.dateReadIdx = i
+		case pf.dateAddedIdx < 0 && matchesHeader(n, dateAddedHeaders):
+			pf.dateAddedIdx = i
 		}
+	}
+
+	if mode == modeNotes {
+		// The notes import only accepts Goodreads exports: a title plus an ISBN
+		// column plus the My Review column it maps to notes.
+		if pf.titleIdx < 0 || (pf.isbn13Idx < 0 && pf.isbnIdx < 0) || pf.reviewIdx < 0 {
+			return nil, validationErrorf(
+				"%s: not a Goodreads library export (expected Title, an ISBN/ISBN13 column, and a My Review column)", f.Name)
+		}
+		pf.kind = kindGoodreadsNotes
+		return finishParse(r, pf)
 	}
 
 	switch {
@@ -240,7 +292,13 @@ func parseCSV(f UploadFile) (*parsedFile, error) {
 		return nil, validationErrorf(
 			"%s: header row not recognized as a TV Time or Goodreads export (expected a title column, plus an ISBN column for books)", f.Name)
 	}
+	return finishParse(r, pf)
+}
 
+// finishParse reads the remaining data records into pf. Rows that fail CSV
+// parsing are kept as nil placeholders so the background job counts them as
+// skipped rather than silently dropping them (Total stays accurate).
+func finishParse(r *csv.Reader, pf *parsedFile) (*parsedFile, error) {
 	for {
 		rec, err := r.Read()
 		if err == io.EOF {

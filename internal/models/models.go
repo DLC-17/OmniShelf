@@ -213,6 +213,7 @@ func All() []any {
 		&Episode{},
 		&EpisodeWatch{},
 		&Book{},
+		&BookNote{},
 		&Game{},
 		&Movie{},
 		&ImportJob{},
@@ -221,7 +222,6 @@ func All() []any {
 		&ShowAlias{},
 		&Tag{},
 		&MediaTag{},
-		&BookNote{},
 		&OwnershipFormat{},
 	}
 }
