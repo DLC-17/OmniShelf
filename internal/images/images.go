@@ -16,6 +16,13 @@ import (
 	"strings"
 )
 
+// safePathComponent reports whether s can be used as a single path element:
+// non-empty, no separators, and not a dot-directory reference.
+func safePathComponent(s string) bool {
+	return s != "" && s != "." && s != ".." &&
+		!strings.ContainsAny(s, `/\`) && !strings.ContainsRune(s, 0)
+}
+
 // Store writes cached artwork under a root directory.
 type Store struct {
 	rootDir string
@@ -33,6 +40,12 @@ func New(rootDir string) *Store {
 // failure removes the temp file and returns an error, leaving no partial
 // files (E13). Responses without an image content-type are rejected.
 func (s *Store) Fetch(ctx context.Context, httpClient *http.Client, url, kind, externalID string) (string, error) {
+	// kind and externalID become filesystem path components; reject anything
+	// that could escape the root even if a caller forgets to sanitize its
+	// upstream-supplied ID (defense in depth against path traversal).
+	if !safePathComponent(kind) || !safePathComponent(externalID) {
+		return "", fmt.Errorf("images: unsafe path component kind=%q externalID=%q", kind, externalID)
+	}
 	relPath := filepath.ToSlash(filepath.Join(kind, externalID+".jpg"))
 	dir := filepath.Join(s.rootDir, kind)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

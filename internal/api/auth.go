@@ -21,6 +21,14 @@ const bcryptCost = 12
 // minPasswordLen is the minimum accepted password length.
 const minPasswordLen = 8
 
+// maxPasswordLen matches bcrypt's 72-byte input limit; longer passwords must
+// be rejected up front or GenerateFromPassword fails at registration time.
+const maxPasswordLen = 72
+
+// maxUsernameLen bounds usernames so they stay renderable in the UI and
+// cannot be abused to bloat the database.
+const maxUsernameLen = 32
+
 // Sentinel errors returned by the auth service functions; the handlers
 // translate them into envelope responses.
 var (
@@ -31,8 +39,9 @@ var (
 )
 
 type authHandler struct {
-	db     *gorm.DB
-	secret []byte
+	db      *gorm.DB
+	secret  []byte
+	limiter *failureLimiter
 }
 
 type registerRequest struct {
@@ -51,8 +60,28 @@ type userResponse struct {
 	Username string `json:"username"`
 }
 
-// register handles POST /api/auth/register.
+// validUsername reports whether the (already trimmed) username is within
+// length bounds and free of control characters.
+func validUsername(name string) bool {
+	if name == "" || len(name) > maxUsernameLen {
+		return false
+	}
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+// register handles POST /api/auth/register. Failed invite-code guesses are
+// rate limited per source IP so single-use codes cannot be brute forced.
 func (a *authHandler) register(c *gin.Context) {
+	if a.limiter.blocked(c.ClientIP()) {
+		Error(c, http.StatusTooManyRequests, CodeRateLimited, "too many failed attempts; try again later")
+		return
+	}
+
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with username, password, and inviteCode")
@@ -60,11 +89,14 @@ func (a *authHandler) register(c *gin.Context) {
 	}
 	req.Username = strings.TrimSpace(req.Username)
 	switch {
-	case req.Username == "":
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "username must not be empty")
+	case !validUsername(req.Username):
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("username must be 1–%d characters without control characters", maxUsernameLen))
 		return
 	case len(req.Password) < minPasswordLen:
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("password must be at least %d characters", minPasswordLen))
+		return
+	case len(req.Password) > maxPasswordLen:
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("password must be at most %d bytes", maxPasswordLen))
 		return
 	case req.InviteCode == "":
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "inviteCode must not be empty")
@@ -74,8 +106,10 @@ func (a *authHandler) register(c *gin.Context) {
 	user, err := registerUser(c.Request.Context(), a.db, req.Username, req.Password, req.InviteCode)
 	switch {
 	case errors.Is(err, errInviteInvalid):
+		a.limiter.fail(c.ClientIP())
 		Error(c, http.StatusBadRequest, CodeInviteInvalid, "invite code is not valid")
 	case errors.Is(err, errInviteUsed):
+		a.limiter.fail(c.ClientIP())
 		Error(c, http.StatusConflict, CodeInviteUsed, "invite code has already been used")
 	case errors.Is(err, errUsernameTaken):
 		Error(c, http.StatusConflict, CodeUsernameTaken, "username is already taken")
@@ -86,8 +120,15 @@ func (a *authHandler) register(c *gin.Context) {
 	}
 }
 
-// login handles POST /api/auth/login.
+// login handles POST /api/auth/login. Failed attempts are rate limited per
+// source IP to slow password brute force; a successful login resets the
+// budget.
 func (a *authHandler) login(c *gin.Context) {
+	if a.limiter.blocked(c.ClientIP()) {
+		Error(c, http.StatusTooManyRequests, CodeRateLimited, "too many failed attempts; try again later")
+		return
+	}
+
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with username and password")
@@ -97,12 +138,14 @@ func (a *authHandler) login(c *gin.Context) {
 	user, err := authenticate(c.Request.Context(), a.db, strings.TrimSpace(req.Username), req.Password)
 	if err != nil {
 		if errors.Is(err, errBadCredentials) {
+			a.limiter.fail(c.ClientIP())
 			Error(c, http.StatusUnauthorized, CodeBadCredentials, "unknown username or wrong password")
 			return
 		}
 		Error(c, http.StatusInternalServerError, CodeInternal, "login failed")
 		return
 	}
+	a.limiter.reset(c.ClientIP())
 
 	token, err := newToken(a.secret, user.ID, time.Now())
 	if err != nil {

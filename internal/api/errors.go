@@ -14,6 +14,7 @@ const (
 	CodeUsernameTaken  = "username_taken"
 	CodeBadCredentials = "bad_credentials"
 	CodeUnauthorized   = "unauthorized"
+	CodeRateLimited    = "rate_limited"
 	CodeInternal       = "internal_error"
 )
 

@@ -30,10 +30,18 @@ const userIDKey = "omnishelf_user_id"
 // /api/auth/register is guarded by the auth middleware.
 func RegisterRoutes(r *gin.Engine, gdb *gorm.DB, cfg *config.Config) *gin.RouterGroup {
 	secret := []byte(cfg.JWTSecret)
-	a := &authHandler{db: gdb, secret: secret}
+	a := &authHandler{
+		db:      gdb,
+		secret:  secret,
+		limiter: newFailureLimiter(authFailureLimit, authFailureWindow),
+	}
 
-	r.POST("/api/auth/register", a.register)
-	r.POST("/api/auth/login", a.login)
+	// The unauthenticated auth endpoints get a tight body cap: their JSON
+	// payloads are tiny, and without a cap an anonymous client could stream
+	// arbitrarily large bodies at the server.
+	auth := r.Group("/api/auth", maxBodyBytes(maxAuthBodyBytes))
+	auth.POST("/register", a.register)
+	auth.POST("/login", a.login)
 
 	protected := r.Group("/api", AuthRequired(secret))
 	protected.POST("/auth/logout", a.logout)
@@ -96,6 +104,36 @@ func parseToken(secret []byte, raw string) (uint, error) {
 		return 0, fmt.Errorf("invalid subject claim %q", claims.Subject)
 	}
 	return uint(id), nil
+}
+
+// maxAuthBodyBytes caps request bodies on the unauthenticated auth endpoints.
+const maxAuthBodyBytes = 1 << 20 // 1 MiB
+
+// maxBodyBytes rejects request bodies larger than n; the JSON binder then
+// surfaces the truncation as a plain 400.
+func maxBodyBytes(n int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
+		c.Next()
+	}
+}
+
+// SecurityHeaders sets browser hardening headers on every response. The CSP
+// is written for the embedded SPA: same-origin everything, plus blob:/data:
+// for the barcode scanner's camera frames, and inline styles for
+// runtime-injected <style> tags.
+func SecurityHeaders() gin.HandlerFunc {
+	const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+		"img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; " +
+		"worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+	return func(c *gin.Context) {
+		h := c.Writer.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Content-Security-Policy", csp)
+		c.Next()
+	}
 }
 
 // setSessionCookie writes (or, with an empty token and negative maxAge,

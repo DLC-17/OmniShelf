@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log"
 	"net/http"
 	"os"
 
@@ -26,21 +27,25 @@ type healthHandler struct {
 // either unavailable → 503 with a human-readable detail so the failure shows
 // up in the container logs.
 func (h *healthHandler) check(c *gin.Context) {
+	// The probe is unauthenticated, so raw error strings (paths, driver
+	// internals) are logged for the operator but never sent to the client.
 	if err := h.pingDB(); err != nil {
+		log.Printf("health: database ping failed: %v", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "unavailable",
 			"db":     "error",
-			"detail": err.Error(),
+			"detail": "database unavailable (see container logs)",
 		})
 		return
 	}
 
 	if err := h.checkImagesDir(); err != nil {
+		log.Printf("health: images volume check failed: %v", err)
 		c.JSON(http.StatusServiceUnavailable, gin.H{
 			"status": "unavailable",
 			"db":     "ok",
 			"images": "error",
-			"detail": err.Error(),
+			"detail": "images volume unavailable (see container logs)",
 		})
 		return
 	}

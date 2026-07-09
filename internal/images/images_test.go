@@ -142,3 +142,25 @@ func TestFetchNon200Status(t *testing.T) {
 	require.Error(t, err)
 	assertNoTempFiles(t, root)
 }
+
+func TestFetchRejectsUnsafePathComponents(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Write(fakeJPEG)
+	}))
+	defer srv.Close()
+
+	store := New(t.TempDir())
+	for _, tc := range []struct{ kind, externalID string }{
+		{"tv", "../../etc/passwd"},
+		{"tv", `..\..\omnishelf`},
+		{"..", "1399"},
+		{"tv/../..", "1399"},
+		{"", "1399"},
+		{"tv", ""},
+		{"tv", "."},
+	} {
+		_, err := store.Fetch(context.Background(), srv.Client(), srv.URL, tc.kind, tc.externalID)
+		assert.Error(t, err, "kind=%q externalID=%q must be rejected", tc.kind, tc.externalID)
+	}
+}

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
@@ -70,7 +72,12 @@ func runServer() error {
 
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	// Trust no proxy headers: c.ClientIP() must be the socket peer address,
+	// or a client could spoof X-Forwarded-For to dodge the auth rate limiter.
+	if err := router.SetTrustedProxies(nil); err != nil {
+		return fmt.Errorf("configuring trusted proxies: %w", err)
+	}
+	router.Use(gin.Logger(), gin.Recovery(), api.SecurityHeaders())
 
 	// Shared external clients and image cache.
 	tmdbClient := tmdb.New(cfg.TMDBAPIKey)
@@ -129,7 +136,16 @@ func runServer() error {
 
 	addr := net.JoinHostPort("0.0.0.0", cfg.Port)
 	log.Printf("omnishelf listening on %s (data=%s images=%s)", addr, cfg.DataDir, cfg.ImagesDir)
-	if err := router.Run(addr); err != nil {
+	srv := &http.Server{
+		Addr:    addr,
+		Handler: router,
+		// Bound how long an idle or trickling connection can hold a worker
+		// (Slowloris). No WriteTimeout: CSV imports and image fetches can
+		// legitimately take a while.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		return fmt.Errorf("http server: %w", err)
 	}
 	return nil

@@ -8,6 +8,14 @@ import (
 	"path/filepath"
 )
 
+// minJWTSecretLen is the minimum accepted OMNISHELF_JWT_SECRET length; a
+// short HMAC key makes forged session tokens brute-forceable offline.
+const minJWTSecretLen = 32
+
+// jwtSecretPlaceholder is the .env.example value, rejected so a deployment
+// cannot accidentally go live with the published default.
+const jwtSecretPlaceholder = "change-me-to-a-long-random-string"
+
 // Config holds all runtime configuration for OmniShelf.
 type Config struct {
 	// Port is the HTTP listen port (OMNISHELF_PORT, default 8080).
@@ -58,6 +66,9 @@ func Load() (*Config, error) {
 
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("OMNISHELF_JWT_SECRET is not set: refusing to start (a stable secret is required so sessions survive restarts)")
+	}
+	if len(cfg.JWTSecret) < minJWTSecretLen || cfg.JWTSecret == jwtSecretPlaceholder {
+		return nil, fmt.Errorf("OMNISHELF_JWT_SECRET is too weak: set a random value of at least %d characters (generate one with: openssl rand -hex 32)", minJWTSecretLen)
 	}
 
 	for _, dir := range []struct{ name, path string }{
