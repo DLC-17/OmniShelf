@@ -282,6 +282,10 @@ button:disabled {
   background: var(--espresso);
   color: var(--cream);
 }
+/* The glyph is a phone-only bottom-tab affordance; desktop nav stays text pills. */
+.nav-icon {
+  display: none;
+}
 .nav-spacer {
   margin-left: auto;
   display: flex;
@@ -933,4 +937,159 @@ button:disabled {
 .divided > li {
   padding: 0.7rem 0;
   border-bottom: 1px solid var(--border);
+}
+
+/* ============================================================
+   Mobile / phone-first responsive layer (native-app feel)
+   ============================================================ */
+@media (max-width: 640px) {
+  /* Leave room for the fixed bottom tab bar and avoid horizontal scroll. */
+  .app-shell {
+    padding: 0 0.85rem calc(4.75rem + env(safe-area-inset-bottom));
+    max-width: 100%;
+  }
+  main {
+    overflow-x: hidden;
+  }
+
+  /* Top nav becomes a fixed bottom tab bar with icon-over-label tabs. */
+  .topnav {
+    position: fixed;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 0.3rem 0.25rem calc(0.3rem + env(safe-area-inset-bottom));
+    gap: 0;
+    flex-wrap: nowrap;
+    justify-content: space-around;
+    align-items: stretch;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+  }
+  .brand {
+    display: none;
+  }
+  .nav-spacer {
+    margin-left: 0;
+    display: contents;
+  }
+  .nav-link {
+    flex: 1 1 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    min-height: 3.25rem;
+    padding: 0.3rem 0.1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-align: center;
+  }
+  .nav-link.active {
+    background: transparent;
+    color: var(--espresso);
+  }
+  .nav-icon {
+    display: block;
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+  .nav-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Bigger default tap targets for controls. */
+  button,
+  input,
+  select,
+  textarea,
+  .nav-link,
+  .tab {
+    min-height: 2.75rem;
+  }
+  .btn-ghost,
+  .modal-close {
+    min-height: 2.5rem;
+  }
+
+  /* Detail/confirm modals become full-screen sheets that slide up. */
+  .modal-backdrop {
+    padding: 0;
+    place-items: stretch;
+  }
+  .modal {
+    max-width: 100%;
+    min-height: 100%;
+    border: none;
+    border-radius: 0;
+    padding: 1.15rem 1.05rem calc(1.5rem + env(safe-area-inset-bottom));
+    animation: sheet-up 0.22s ease-out;
+  }
+  .modal-close {
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 1.15rem;
+    padding: 0.45rem 0.75rem;
+  }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(2.5rem);
+      opacity: 0.6;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+
+  /* The item detail stacks its cover above the metadata on narrow screens. */
+  .detail {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .detail .grow {
+    width: 100%;
+    text-align: left;
+  }
+
+  /* Tighter, fluid cover grid: three-across on a phone. */
+  .cover-grid {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 0.75rem;
+  }
+
+  /* Filter dropdown fills the width so options aren't cramped. */
+  .filter-panel {
+    position: fixed;
+    left: 0.85rem;
+    right: 0.85rem;
+    min-width: 0;
+  }
+  .library-toolbar {
+    gap: 0.5rem;
+  }
+  .library-search {
+    flex-basis: 100%;
+  }
+
+  /* Wide content (tables, code, scanners) scrolls inside itself, not the page. */
+  table {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  img,
+  video,
+  canvas {
+    max-width: 100%;
+    height: auto;
+  }
 }
