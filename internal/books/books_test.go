@@ -370,6 +370,16 @@ func TestUpdateItem(t *testing.T) {
 	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, intPtr(-1), nil)
 	assert.ErrorIs(t, err, ErrInvalidProgress)
 
+	// Ownership: multi-select over the fixed set (music), via SetOwnership.
+	musicItem := seedItem(t, gdb, 1, TypeMusic, "mb:abc", StatusListening)
+	formats, err := svc.SetOwnership(ctx, 1, musicItem.ID, []string{"CD", "Vinyl"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"Vinyl", "CD"}, formats, "returned in allowed order")
+	_, err = svc.SetOwnership(ctx, 1, musicItem.ID, []string{"Cassette"})
+	assert.Error(t, err, "Cassette is not a music format")
+	_, err = svc.SetOwnership(ctx, 1, bookItem.ID, []string{"CD"})
+	assert.Error(t, err, "books have no ownership vocabulary")
+
 	// Empty patch.
 	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, nil)
 	assert.ErrorIs(t, err, ErrEmptyUpdate)

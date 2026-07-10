@@ -35,14 +35,17 @@ const (
 	TypeBook  = "BOOK"
 	TypeGame  = "GAME"
 	TypeMovie = "MOVIE"
+	TypeMusic = "MUSIC"
 )
 
-// Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING.
-// COMPLETED, PLAN_TO ("not started") and STOPPED (dropped) apply to all.
+// Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING;
+// music uses LISTENING. COMPLETED, PLAN_TO ("not started") and STOPPED
+// (dropped) apply to all.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
 	StatusPlaying   = "PLAYING"
+	StatusListening = "LISTENING"
 	StatusCompleted = "COMPLETED"
 	StatusPlanTo    = "PLAN_TO"
 	StatusStopped   = "STOPPED"
@@ -67,6 +70,9 @@ var (
 	ErrInvalidProgress = errors.New("books: invalid progress")
 	// ErrInvalidRating means a rating outside the 0–5 range.
 	ErrInvalidRating = errors.New("books: invalid rating")
+	// ErrInvalidOwnership means an ownership format not valid for the item's type
+	// (or set on a type that has no ownership vocabulary).
+	ErrInvalidOwnership = errors.New("books: invalid ownership")
 	// ErrEmptyUpdate means a PATCH carried no updatable fields.
 	ErrEmptyUpdate = errors.New("books: no fields to update")
 	// ErrInvalidFilter means an unknown type/status library filter value.
@@ -282,7 +288,7 @@ func (s *Service) ListEditions(ctx context.Context, workKey string) ([]openlibra
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie {
+	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie && typ != TypeMusic {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
 	}
 	if status != "" && !isKnownStatus(status) {
@@ -314,8 +320,10 @@ type LibraryEntry struct {
 	PageCount   int      // books only
 	Description string   // books only
 	Platform    string   // games only
+	Artist      string   // music only
+	Year        int      // music only
 	Tags        []string // source-derived tags/keywords; never nil (empty when none)
-	Ownership   []string // user-selected ownership formats (games only); never nil
+	Ownership   []string // user-selected ownership formats (games/music); never nil
 }
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
@@ -331,6 +339,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var movieTMDBIDs []int
 	var isbns []string
 	var gameIGDBIDs []int
+	var albumExtIDs []string
 	for _, it := range items {
 		switch it.Type {
 		case TypeTV:
@@ -350,6 +359,8 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
 				gameIGDBIDs = append(gameIGDBIDs, id)
 			}
+		case TypeMusic:
+			albumExtIDs = append(albumExtIDs, it.ExternalID)
 		}
 	}
 
@@ -393,6 +404,16 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			moviesByTMDB[strconv.Itoa(m.TMDBID)] = m
 		}
 	}
+	albumsByExtID := map[string]models.Album{}
+	if len(albumExtIDs) > 0 {
+		var rows []models.Album
+		if err := s.db.WithContext(ctx).Where("external_id IN ?", albumExtIDs).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading album metadata: %w", err)
+		}
+		for _, a := range rows {
+			albumsByExtID[a.ExternalID] = a
+		}
+	}
 
 	out := make([]LibraryEntry, 0, len(items))
 	// mediaKey records the shared cache-row primary key backing each entry, so
@@ -430,6 +451,12 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.Description = m.Overview
 				mediaKey[i] = m.ID
 			}
+		case TypeMusic:
+			if a, ok := albumsByExtID[it.ExternalID]; ok {
+				entry.ArtworkPath = a.CoverPath
+				entry.Artist = a.Artist
+				entry.Year = a.Year
+			}
 		}
 		if mediaKey[i] != 0 {
 			tagIDsByType[it.Type] = append(tagIDsByType[it.Type], mediaKey[i])
@@ -462,16 +489,24 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	// cache row), ownership is per tracking item, so it batches by TrackingItem.ID
 	// and needs no cache-row join. Only media types with a fixed format set carry
 	// ownership; today that is GAME (#11 adds MUSIC).
-	gameItemIDs := make([]uint, 0)
+	ownItemIDs := map[string][]uint{}
 	for i := range out {
-		if out[i].Item.Type == TypeGame {
-			gameItemIDs = append(gameItemIDs, out[i].Item.ID)
+		switch out[i].Item.Type {
+		case TypeGame, TypeMusic:
+			ownItemIDs[out[i].Item.Type] = append(ownItemIDs[out[i].Item.Type], out[i].Item.ID)
 		}
 	}
-	if len(gameItemIDs) > 0 {
-		byItem, err := ownership.NewStore(s.db).ForItems(ctx, ownership.TypeGame, gameItemIDs)
-		if err != nil {
-			return nil, err
+	if len(ownItemIDs) > 0 {
+		store := ownership.NewStore(s.db)
+		byItem := map[uint][]string{}
+		for typ, ids := range ownItemIDs {
+			formatsByItem, err := store.ForItems(ctx, typ, ids)
+			if err != nil {
+				return nil, err
+			}
+			for id, formats := range formatsByItem {
+				byItem[id] = formats
+			}
 		}
 		for i := range out {
 			if formats, ok := byItem[out[i].Item.ID]; ok {
@@ -888,6 +923,8 @@ func validStatus(typ, status string) bool {
 		return typ == TypeBook
 	case StatusPlaying:
 		return typ == TypeGame
+	case StatusListening:
+		return typ == TypeMusic
 	default:
 		return false
 	}
@@ -896,7 +933,8 @@ func validStatus(typ, status string) bool {
 // isKnownStatus reports whether status is any valid tracking status (used
 // for the type-agnostic library filter).
 func isKnownStatus(status string) bool {
-	return validStatus(TypeTV, status) || validStatus(TypeBook, status)
+	return validStatus(TypeTV, status) || validStatus(TypeBook, status) ||
+		validStatus(TypeGame, status) || validStatus(TypeMusic, status)
 }
 
 // normalizeISBN13 strips hyphens/spaces and validates ISBN-13 shape:

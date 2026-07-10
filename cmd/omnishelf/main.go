@@ -19,11 +19,14 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/books"
 	"github.com/davidlc1229/omnishelf/internal/config"
 	"github.com/davidlc1229/omnishelf/internal/db"
+	"github.com/davidlc1229/omnishelf/internal/discogs"
 	"github.com/davidlc1229/omnishelf/internal/games"
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/images"
 	"github.com/davidlc1229/omnishelf/internal/importer"
 	"github.com/davidlc1229/omnishelf/internal/movies"
+	"github.com/davidlc1229/omnishelf/internal/music"
+	"github.com/davidlc1229/omnishelf/internal/musicbrainz"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 	syncengine "github.com/davidlc1229/omnishelf/internal/sync"
@@ -85,6 +88,8 @@ func runServer() error {
 	olClient := openlibrary.New(cfg.ContactEmail)
 	scandexClient := scandex.New(cfg.ScandexUserID, cfg.ScandexAccessToken)
 	igdbClient := igdb.New(cfg.IGDBClientID, cfg.IGDBClientSecret)
+	discogsClient := discogs.New(cfg.DiscogsToken)
+	musicbrainzClient := musicbrainz.New(cfg.ContactEmail)
 	imageStore := images.New(cfg.ImagesDir)
 
 	// Unauthenticated liveness probe (Docker HEALTHCHECK / TrueNAS): reachable
@@ -108,6 +113,9 @@ func runServer() error {
 
 	gameSvc := games.NewService(gdb, scandexClient, igdbClient, imageStore)
 	api.RegisterGameRoutes(protected, gameSvc)
+
+	musicSvc := music.NewService(gdb, discogsClient, musicbrainzClient, imageStore)
+	api.RegisterMusicRoutes(protected, musicSvc)
 
 	imp := importer.New(importer.Config{DB: gdb, TMDB: tmdbClient, Images: imageStore})
 	api.RegisterImportRoutes(protected, imp)

@@ -44,7 +44,8 @@ const (
 // extension point: #11 adds TypeMusic here. The order is canonical and drives
 // the order formats are returned in for the DTO, so display is stable.
 var allowedFormats = map[string][]string{
-	TypeGame: {FormatPhysical, FormatGOG},
+	TypeGame:  {FormatPhysical, FormatGOG},
+	TypeMusic: {FormatVinyl, FormatCD},
 }
 
 // ErrInvalidFormat means a requested format is not in the allowed set for the

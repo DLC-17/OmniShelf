@@ -46,8 +46,10 @@ type itemResponse struct {
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
 	Platform    string    `json:"platform"`
+	Artist      string    `json:"artist"`    // music only
+	Year        int       `json:"year"`      // music only
 	Tags        []string  `json:"tags"`      // source-derived tags/keywords; [] when none
-	Ownership   []string  `json:"ownership"` // user-selected ownership formats (games); [] when none
+	Ownership   []string  `json:"ownership"` // user-selected ownership formats (games/music); [] when none
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
@@ -74,6 +76,8 @@ func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r.PageCount = e.PageCount
 	r.Description = e.Description
 	r.Platform = e.Platform
+	r.Artist = e.Artist
+	r.Year = e.Year
 	if e.Tags != nil {
 		r.Tags = e.Tags
 	}
@@ -98,7 +102,7 @@ func (h *libraryHandler) list(c *gin.Context) {
 		c.Query("type"), c.Query("status"))
 	switch {
 	case errors.Is(err, books.ErrInvalidFilter):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, or GAME; status must be WATCHING, READING, PLAYING, PLAN_TO, COMPLETED, or STOPPED")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, or MUSIC; status must be WATCHING, READING, PLAYING, LISTENING, PLAN_TO, COMPLETED, or STOPPED")
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "listing library failed")
 	default:

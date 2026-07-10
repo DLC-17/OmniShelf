@@ -1,20 +1,31 @@
 import { request } from './client'
 
-export type MediaType = 'TV' | 'BOOK' | 'GAME' | 'MOVIE'
+export type MediaType = 'TV' | 'BOOK' | 'GAME' | 'MOVIE' | 'MUSIC'
 
 /** All statuses across every media type; per-type validity is enforced server-side. */
-export type ItemStatus = 'WATCHING' | 'READING' | 'PLAYING' | 'PLAN_TO' | 'COMPLETED' | 'STOPPED'
+export type ItemStatus =
+  | 'WATCHING'
+  | 'READING'
+  | 'PLAYING'
+  | 'LISTENING'
+  | 'PLAN_TO'
+  | 'COMPLETED'
+  | 'STOPPED'
 
 export const TV_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const GAME_STATUSES: ItemStatus[] = ['PLAYING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const MOVIE_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
+export const MUSIC_STATUSES: ItemStatus[] = ['LISTENING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 
 /**
  * Fixed ownership-format option set for games (multi-select). The server
  * validates against the same set; #11 adds a music equivalent (Vinyl, CD).
  */
 export const GAME_OWNERSHIP: string[] = ['Physical', 'GOG']
+
+/** Fixed ownership-format option set for music (multi-select: Vinyl, CD). */
+export const MUSIC_OWNERSHIP: string[] = ['Vinyl', 'CD']
 
 export interface LibraryItem {
   id: number
@@ -36,9 +47,12 @@ export interface LibraryItem {
   description: string
   /** Games only. */
   platform: string
+  /** Music only. */
+  artist: string
+  year: number
   /** Source-derived tags/keywords (TMDB/IGDB/OpenLibrary); [] when none. */
   tags: string[]
-  /** User-selected ownership formats (games: Physical/GOG); [] when none. */
+  /** User-selected ownership formats (games: Physical/GOG; music: Vinyl/CD); [] when none. */
   ownership: string[]
   updatedAt: string
 }

@@ -43,6 +43,11 @@ type Config struct {
 	// summary.
 	IGDBClientID     string
 	IGDBClientSecret string
+	// DiscogsToken authenticates Discogs album barcode lookups
+	// (OMNISHELF_DISCOGS_TOKEN). Optional: when unset the music module returns a
+	// clear "not configured" error for scans instead of failing startup;
+	// MusicBrainz name search (which needs no key) still works.
+	DiscogsToken string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -62,6 +67,8 @@ func Load() (*Config, error) {
 
 		IGDBClientID:     os.Getenv("IGDB_CLIENT_ID"),
 		IGDBClientSecret: os.Getenv("IGDB_CLIENT_SECRET"),
+
+		DiscogsToken: os.Getenv("OMNISHELF_DISCOGS_TOKEN"),
 	}
 
 	if cfg.JWTSecret == "" {

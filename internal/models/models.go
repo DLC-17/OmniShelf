@@ -26,7 +26,7 @@ type TrackingItem struct {
 	Type       string `gorm:"type:varchar(10);not null;index:idx_user_media,unique"` // "TV" | "BOOK"
 	ExternalID string `gorm:"not null;index:idx_user_media,unique"`                  // TMDB ID | ISBN-13 | barcode
 	Title      string `gorm:"not null"`
-	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, PLAYING, COMPLETED, PLAN_TO, STOPPED
+	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, PLAYING, LISTENING, COMPLETED, PLAN_TO, STOPPED
 	Progress   int    `gorm:"default:0"`          // page number (books); unused for TV
 	Rating     int    `gorm:"default:0"`          // user's 1–5 self-rating; 0 = unrated
 	UpdatedAt  time.Time
@@ -148,6 +148,25 @@ type OwnershipFormat struct {
 	Format    string `gorm:"not null;uniqueIndex:idx_ownership_format"`
 }
 
+// Album is the shared Discogs/MusicBrainz metadata cache (one row per album,
+// all users). An album is added either from a Discogs barcode scan or a
+// MusicBrainz name search, so ExternalID is a source-prefixed key —
+// "discogs:<id>" or "mb:<mbid>" — reused verbatim as the MUSIC TrackingItem's
+// ExternalID. Albums are grouped by Artist in the library; no separate Artist
+// table is needed. Barcode/DiscogsID are set only for scanned albums;
+// MusicBrainzID only for search-added ones.
+type Album struct {
+	ID            uint   `gorm:"primaryKey"`
+	ExternalID    string `gorm:"unique;not null"` // "discogs:<id>" | "mb:<mbid>"
+	Artist        string `gorm:"not null;index"`
+	Title         string `gorm:"not null"`
+	Year          int
+	CoverPath     string // relative path under images dir; "" = no cover
+	Barcode       string // scanned UPC/EAN (Discogs only); may be empty
+	DiscogsID     int
+	MusicBrainzID string
+}
+
 // ShowAlias remembers that an imported (normalized) series title resolved to a
 // TMDB id, so future imports of the same title skip the TMDB search entirely.
 type ShowAlias struct {
@@ -216,6 +235,7 @@ func All() []any {
 		&BookNote{},
 		&Game{},
 		&Movie{},
+		&Album{},
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},

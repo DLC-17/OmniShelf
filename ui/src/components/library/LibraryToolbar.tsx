@@ -3,12 +3,13 @@ import {
   BOOK_STATUSES,
   GAME_STATUSES,
   MOVIE_STATUSES,
+  MUSIC_STATUSES,
   TV_STATUSES,
 } from '../../api/library'
 import type { ItemStatus, LibraryItem, MediaType } from '../../api/library'
 
 /** A single filterable facet of a library item. */
-export type FilterAspect = 'status' | 'author' | 'platform' | 'ownership' | 'tag'
+export type FilterAspect = 'status' | 'author' | 'platform' | 'ownership' | 'tag' | 'artist'
 
 /** Selected values keyed by aspect; an aspect is "active" once it has ≥1 value. */
 export type FilterState = Partial<Record<FilterAspect, string[]>>
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
   WATCHING: 'Watching',
   READING: 'Reading',
   PLAYING: 'Playing',
+  LISTENING: 'Listening',
   PLAN_TO: 'Not started',
   COMPLETED: 'Completed',
   STOPPED: 'Stopped',
@@ -37,6 +39,7 @@ const MEDIA_NOUN: Record<MediaType, string> = {
   BOOK: 'books',
   GAME: 'games',
   MOVIE: 'movies',
+  MUSIC: 'albums',
 }
 
 const splitCsv = (s: string): string[] =>
@@ -68,6 +71,11 @@ const TAG_ASPECT: AspectDef = {
   label: 'Tag',
   values: (i) => i.tags ?? [],
 }
+const ARTIST_ASPECT: AspectDef = {
+  aspect: 'artist',
+  label: 'Artist',
+  values: (i) => (i.artist ? [i.artist] : []),
+}
 
 /** Per-media aspects, in dropdown order. Aspects with no values auto-hide. */
 const ASPECTS: Record<MediaType, AspectDef[]> = {
@@ -75,6 +83,7 @@ const ASPECTS: Record<MediaType, AspectDef[]> = {
   MOVIE: [STATUS_ASPECT, TAG_ASPECT],
   BOOK: [STATUS_ASPECT, AUTHOR_ASPECT, TAG_ASPECT],
   GAME: [STATUS_ASPECT, PLATFORM_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
+  MUSIC: [STATUS_ASPECT, ARTIST_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
 }
 
 function statusesFor(media: MediaType): ItemStatus[] {
@@ -85,6 +94,8 @@ function statusesFor(media: MediaType): ItemStatus[] {
       return GAME_STATUSES
     case 'MOVIE':
       return MOVIE_STATUSES
+    case 'MUSIC':
+      return MUSIC_STATUSES
     default:
       return TV_STATUSES
   }
@@ -110,6 +121,7 @@ function itemHaystack(item: LibraryItem): string {
     item.title,
     item.authors,
     item.platform,
+    item.artist,
     STATUS_LABELS[item.status] ?? item.status,
     ...(item.tags ?? []),
     ...(item.ownership ?? []),

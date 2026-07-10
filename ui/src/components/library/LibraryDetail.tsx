@@ -1,6 +1,14 @@
 import { useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
-import { BOOK_STATUSES, GAME_OWNERSHIP, GAME_STATUSES, MOVIE_STATUSES, TV_STATUSES } from '../../api/library'
+import {
+  BOOK_STATUSES,
+  GAME_OWNERSHIP,
+  GAME_STATUSES,
+  MOVIE_STATUSES,
+  MUSIC_OWNERSHIP,
+  MUSIC_STATUSES,
+  TV_STATUSES,
+} from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
 import { useDeleteItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
@@ -43,15 +51,23 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const isGame = item.type === 'GAME'
   const isTV = item.type === 'TV'
   const isMovie = item.type === 'MOVIE'
+  const isMusic = item.type === 'MUSIC'
   const statuses = isBook
     ? BOOK_STATUSES
     : isGame
       ? GAME_STATUSES
       : isMovie
         ? MOVIE_STATUSES
-        : TV_STATUSES
+        : isMusic
+          ? MUSIC_STATUSES
+          : TV_STATUSES
 
-  const runUpdate = (patch: { status?: ItemStatus; progress?: number; rating?: number }) => {
+  const runUpdate = (patch: {
+    status?: ItemStatus
+    progress?: number
+    rating?: number
+    ownership?: string[]
+  }) => {
     setError(null)
     update.mutate(
       { id: item.id, patch },
@@ -174,6 +190,8 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
             {isBook && item.authors !== '' && <p className="muted" style={{ margin: 0 }}>{item.authors}</p>}
             {isBook && item.pageCount > 0 && <p className="meta">{item.pageCount} pages</p>}
             {isGame && item.platform !== '' && <p className="muted" style={{ margin: 0 }}>{item.platform}</p>}
+            {isMusic && item.artist !== '' && <p className="muted" style={{ margin: 0 }}>{item.artist}</p>}
+            {isMusic && item.year > 0 && <p className="meta">{item.year}</p>}
 
             <div className="detail-rating">
               <span className="muted">Your rating</span>
@@ -214,6 +232,18 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
                   style={{ width: '6rem' }}
                 />
               </label>
+            )}
+
+            {isMusic && (
+              <div className="field" style={{ marginTop: '0.5rem' }}>
+                <OwnershipSelect
+                  options={MUSIC_OWNERSHIP}
+                  selected={ownership}
+                  disabled={updateOwnership.isPending}
+                  label={`Ownership for ${item.title}`}
+                  onChange={handleOwnership}
+                />
+              </div>
             )}
           </div>
         </div>
