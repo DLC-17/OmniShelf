@@ -110,7 +110,7 @@ export default function BookSearch() {
         <input
           type="search"
           aria-label="Search books"
-          placeholder="Search books…"
+          placeholder="Search books by title or author…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />

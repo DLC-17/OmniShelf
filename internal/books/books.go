@@ -255,20 +255,42 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 	return &item, nil
 }
 
-// SearchTitle returns OpenLibrary works matching a free-text title query, for
-// the add-by-name flow. A blank query yields ErrEmptyQuery; an upstream failure
-// is wrapped in ErrUpstream. The caller lists a work's editions (ListEditions)
-// then adds the chosen ISBN through the existing Scan + Track path.
-func (s *Service) SearchTitle(ctx context.Context, title string) ([]openlibrary.TitleResult, error) {
-	title = strings.TrimSpace(title)
-	if title == "" {
+// SearchTitle returns OpenLibrary works matching a free-text query by TITLE or
+// AUTHOR, for the add-by-name flow. It runs both an OpenLibrary title search and
+// an author search and merges the results (title matches first), deduped by work
+// key. A blank query yields ErrEmptyQuery; an upstream failure is wrapped in
+// ErrUpstream. The caller lists a work's editions (ListEditions) then adds the
+// chosen ISBN through the existing Scan + Track path.
+func (s *Service) SearchTitle(ctx context.Context, query string) ([]openlibrary.TitleResult, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
 		return nil, ErrEmptyQuery
 	}
-	results, err := s.metadata.SearchByTitle(ctx, title)
+	byTitle, err := s.metadata.SearchByTitle(ctx, query)
 	if err != nil {
 		return nil, errors.Join(ErrUpstream, err)
 	}
-	return results, nil
+	byAuthor, err := s.metadata.SearchByAuthor(ctx, query)
+	if err != nil {
+		return nil, errors.Join(ErrUpstream, err)
+	}
+
+	const maxResults = 20
+	merged := make([]openlibrary.TitleResult, 0, maxResults)
+	seen := make(map[string]bool)
+	for _, group := range [][]openlibrary.TitleResult{byTitle, byAuthor} {
+		for _, r := range group {
+			if seen[r.WorkKey] {
+				continue
+			}
+			seen[r.WorkKey] = true
+			merged = append(merged, r)
+			if len(merged) == maxResults {
+				return merged, nil
+			}
+		}
+	}
+	return merged, nil
 }
 
 // ListEditions returns the ISBN-bearing editions of a work so the user can pick

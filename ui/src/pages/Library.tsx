@@ -5,10 +5,8 @@ import LibraryDetail from '../components/library/LibraryDetail'
 import LibraryToolbar, { applyLibrarySearch } from '../components/library/LibraryToolbar'
 import type { FilterState } from '../components/library/LibraryToolbar'
 import MovieSearch from '../components/movies/MovieSearch'
-import MusicScan from '../components/music/MusicScan'
 import MusicSearch from '../components/music/MusicSearch'
 import Poster from '../components/tv/Poster'
-import { BookScan, GameScan } from './Scan'
 import { useLibrary } from '../hooks/useLibrary'
 import ShowSearch from '../components/tv/ShowSearch'
 import GameSearch from '../components/games/GameSearch'
@@ -104,14 +102,12 @@ export default function Library() {
       {media === 'BOOK' && (
         <>
         <BookSearch />
-        <BookScan />
         <hr/>
         </>
       )}
       {media=== 'GAME' && (
         <>
         <GameSearch />
-        <GameScan/>
         <hr/>
         </>
       )}
@@ -123,8 +119,6 @@ export default function Library() {
       )}
       {media === 'MUSIC' && (
         <>
-          <MusicScan />
-          <hr />
           <MusicSearch />
           <hr />
         </>

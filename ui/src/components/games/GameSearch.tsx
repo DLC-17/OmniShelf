@@ -72,7 +72,7 @@ export default function GameSearch() {
         <input
           type="search"
           aria-label="Search games"
-          placeholder="Search games…"
+          placeholder="Search games by title…"
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />

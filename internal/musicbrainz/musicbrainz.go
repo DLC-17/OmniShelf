@@ -116,6 +116,10 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]Release
 		"query": {query},
 		"fmt":   {"json"},
 		"limit": {strconv.Itoa(limit)},
+		// dismax uses MusicBrainz's user-friendly parser, matching the bare query
+		// against both the release-group title AND the artist name (the default
+		// Lucene parser only searches the title field).
+		"dismax": {"true"},
 	}
 	var sr searchResponse
 	if err := c.getJSON(ctx, "/release-group?"+q.Encode(), &sr); err != nil {
