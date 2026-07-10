@@ -45,6 +45,7 @@ type bookSearchResult struct {
 	Authors      string `json:"authors"` // comma-joined
 	FirstYear    int    `json:"firstYear"`
 	EditionCount int    `json:"editionCount"`
+	CoverID      int    `json:"coverId"` // OpenLibrary cover id for the cover proxy; 0 when none
 }
 
 // bookEdition is one ISBN-bearing edition offered in the edition picker.
@@ -77,6 +78,7 @@ func (h *booksHandler) search(c *gin.Context) {
 				Authors:      strings.Join(r.Authors, ", "),
 				FirstYear:    r.FirstYear,
 				EditionCount: r.EditionCount,
+				CoverID:      r.CoverID,
 			})
 		}
 		c.JSON(http.StatusOK, gin.H{"results": out})

@@ -18,6 +18,8 @@ export interface GameSearchResult {
   name: string
   /** First release year, or 0 when IGDB has no date. */
   year: number
+  /** IGDB cover image_id for the cover proxy; '' when none. */
+  coverImageId: string
 }
 
 /** POST /api/games/add response: the shared game plus the new tracking item. */

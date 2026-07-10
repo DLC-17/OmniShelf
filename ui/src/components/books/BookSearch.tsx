@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import type { BookSearchResult } from '../../api/books'
 import { useAddBookByIsbn, useBookEditions, useBookSearch } from '../../hooks/useBookSearch'
+import SearchCover from '../common/SearchCover'
 
 interface AddFeedback {
   text: string
@@ -137,6 +138,10 @@ export default function BookSearch() {
             return (
               <li key={work.workKey} className="card">
                 <div className="card-row">
+                  <SearchCover
+                    src={work.coverId !== 0 ? `/api/covers/book/${work.coverId}` : null}
+                    title={work.title}
+                  />
                   <div className="grow">
                     <strong>{work.title}</strong>
                     {work.firstYear !== 0 && <span className="muted"> ({work.firstYear})</span>}

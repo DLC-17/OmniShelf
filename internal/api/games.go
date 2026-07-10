@@ -50,9 +50,10 @@ type gameAddRequest struct {
 // gameSearchResult is one IGDB name-search hit. The igdbId is the canonical
 // identity the client posts back to /api/games/add.
 type gameSearchResult struct {
-	IGDBID int    `json:"igdbId"`
-	Name   string `json:"name"`
-	Year   int    `json:"year"`
+	IGDBID       int    `json:"igdbId"`
+	Name         string `json:"name"`
+	Year         int    `json:"year"`
+	CoverImageID string `json:"coverImageId"` // IGDB image_id for the cover proxy; "" when none
 }
 
 // gameResponse is the JSON shape of a Game payload.
@@ -153,7 +154,7 @@ func (h *gamesHandler) search(c *gin.Context) {
 	default:
 		out := make([]gameSearchResult, 0, len(results))
 		for _, r := range results {
-			out = append(out, gameSearchResult{IGDBID: r.ID, Name: r.Name, Year: r.Year})
+			out = append(out, gameSearchResult{IGDBID: r.ID, Name: r.Name, Year: r.Year, CoverImageID: r.CoverImageID})
 		}
 		c.JSON(http.StatusOK, gin.H{"results": out})
 	}

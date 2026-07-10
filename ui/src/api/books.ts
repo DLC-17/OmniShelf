@@ -29,6 +29,8 @@ export interface BookSearchResult {
   /** First publication year, or 0 when OpenLibrary has no date. */
   firstYear: number
   editionCount: number
+  /** OpenLibrary cover id for the cover proxy; 0 when none. */
+  coverId: number
 }
 
 /** One ISBN-bearing edition from GET /api/books/editions. */

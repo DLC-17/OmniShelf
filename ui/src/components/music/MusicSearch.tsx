@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import type { AlbumSearchResult } from '../../api/music'
 import { useAddAlbum, useMusicSearch } from '../../hooks/useMusicSearch'
+import SearchCover from '../common/SearchCover'
 
 interface AddFeedback {
   text: string
@@ -84,6 +85,7 @@ export default function MusicSearch() {
             const fb = feedback[result.mbid]
             return (
               <li key={result.mbid} className="card card-row">
+                <SearchCover src={`/api/covers/music/${result.mbid}`} title={result.title} />
                 <div className="grow">
                   <strong>{result.title}</strong>
                   {result.year > 0 && <span className="muted"> ({result.year})</span>}

@@ -117,6 +117,10 @@ func runServer() error {
 	musicSvc := music.NewService(gdb, discogsClient, musicbrainzClient, imageStore)
 	api.RegisterMusicRoutes(protected, musicSvc)
 
+	// Cover proxy for ephemeral search results (streams source-CDN thumbnails
+	// same-origin so the strict img-src CSP allows them).
+	api.RegisterCoverRoutes(protected, igdbClient, olClient, musicbrainzClient)
+
 	imp := importer.New(importer.Config{DB: gdb, TMDB: tmdbClient, Images: imageStore})
 	api.RegisterImportRoutes(protected, imp)
 

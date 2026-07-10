@@ -2,28 +2,11 @@ import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { ApiError } from '../../api/client'
 import { useAddGame, useGameSearch } from '../../hooks/useGameSearch'
+import SearchCover from '../common/SearchCover'
 
 interface AddFeedback {
   text: string
   isError: boolean
-}
-
-/**
- * Initial-letter placeholder for a search hit. IGDB cover art is only cached
- * locally once a game is added, and hotlinking the IGDB CDN is disallowed, so
- * un-added search results show no thumbnail.
- */
-function ResultPlaceholder({ title }: { title: string }) {
-  return (
-    <div
-      role="img"
-      aria-label={`No cover for ${title}`}
-      className="poster placeholder"
-      style={{ width: 46, height: 69, fontSize: '1rem' }}
-    >
-      {title.charAt(0).toUpperCase()}
-    </div>
-  )
 }
 
 /**
@@ -98,7 +81,10 @@ export default function GameSearch() {
             const fb = feedback[result.igdbId]
             return (
               <li key={result.igdbId} className="card card-row">
-                <ResultPlaceholder title={result.name} />
+                <SearchCover
+                  src={result.coverImageId !== '' ? `/api/covers/game/${result.coverImageId}` : null}
+                  title={result.name}
+                />
                 <div className="grow">
                   <strong>{result.name}</strong>
                   {result.year !== 0 && <span className="muted"> ({result.year})</span>}

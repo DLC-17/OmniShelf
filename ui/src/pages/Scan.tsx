@@ -121,10 +121,11 @@ export default function Scan() {
         </button>
       </div>
 
-      {/* Music brings its own camera/handheld modes and confirm card. */}
+      {/* Music and games are self-contained (own camera/handheld modes + confirm). */}
       {scanMedia === 'music' && <MusicScan />}
+      {scanMedia === 'game' && <GameCameraScan />}
 
-      {scanMedia !== 'music' && (
+      {scanMedia === 'book' && (
         <>
       <div className="tabs" role="tablist" aria-label="Scan mode">
         <button
@@ -147,14 +148,10 @@ export default function Scan() {
         </button>
       </div>
 
-      {/* Reusing our exported components here! */}
-      {mode === 'bulk' && scanMedia === 'book' && <BookScan />}
-      {mode === 'bulk' && scanMedia === 'game' && <GameScan />}
+      {mode === 'bulk' && <BookScan />}
 
       {mode === 'camera' && (
         <>
-          {scanMedia === 'game' && <GameCameraScan />}
-
           {scanMedia === 'book' && (
             <>
               {!secure && (
