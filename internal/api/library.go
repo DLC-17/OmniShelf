@@ -10,6 +10,7 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/books"
 	"github.com/davidlc1229/omnishelf/internal/models"
+	"github.com/davidlc1229/omnishelf/internal/ownership"
 )
 
 // libraryHandler serves the unified shelf endpoints:
@@ -44,6 +45,9 @@ type itemResponse struct {
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
 	Platform    string    `json:"platform"`
+	Artist      string    `json:"artist"`    // music only
+	Year        int       `json:"year"`      // music only
+	Ownership   []string  `json:"ownership"` // owned physical formats (music)
 	UpdatedAt   time.Time `json:"updatedAt"`
 }
 
@@ -56,6 +60,7 @@ func toItemResponse(item *models.TrackingItem) itemResponse {
 		Status:     item.Status,
 		Progress:   item.Progress,
 		Rating:     item.Rating,
+		Ownership:  ownership.Split(item.Ownership),
 		UpdatedAt:  item.UpdatedAt,
 	}
 }
@@ -68,15 +73,18 @@ func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r.PageCount = e.PageCount
 	r.Description = e.Description
 	r.Platform = e.Platform
+	r.Artist = e.Artist
+	r.Year = e.Year
 	return r
 }
 
 // updateItemRequest is the PATCH body; pointer fields distinguish "absent"
 // from zero values.
 type updateItemRequest struct {
-	Status   *string `json:"status"`
-	Progress *int    `json:"progress"`
-	Rating   *int    `json:"rating"`
+	Status    *string   `json:"status"`
+	Progress  *int      `json:"progress"`
+	Rating    *int      `json:"rating"`
+	Ownership *[]string `json:"ownership"`
 }
 
 // list handles GET /api/library?type=&status= — the current user's shelf,
@@ -86,7 +94,7 @@ func (h *libraryHandler) list(c *gin.Context) {
 		c.Query("type"), c.Query("status"))
 	switch {
 	case errors.Is(err, books.ErrInvalidFilter):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, or GAME; status must be WATCHING, READING, PLAYING, PLAN_TO, COMPLETED, or STOPPED")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, or MUSIC; status must be WATCHING, READING, PLAYING, LISTENING, PLAN_TO, COMPLETED, or STOPPED")
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "listing library failed")
 	default:
@@ -110,10 +118,12 @@ func (h *libraryHandler) update(c *gin.Context) {
 		return
 	}
 
-	item, err := h.svc.UpdateItem(c.Request.Context(), CurrentUserID(c), itemID, req.Status, req.Progress, req.Rating)
+	item, err := h.svc.UpdateItem(c.Request.Context(), CurrentUserID(c), itemID, req.Status, req.Progress, req.Rating, req.Ownership)
 	switch {
 	case errors.Is(err, books.ErrEmptyUpdate):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "provide status, progress, and/or rating")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "provide status, progress, rating, and/or ownership")
+	case errors.Is(err, books.ErrInvalidOwnership):
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "ownership formats must be valid for this item's type (music: Vinyl and/or CD)")
 	case errors.Is(err, books.ErrInvalidStatus):
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "status is not valid for this item's type")
 	case errors.Is(err, books.ErrInvalidProgress):

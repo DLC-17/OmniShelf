@@ -24,6 +24,7 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
+	"github.com/davidlc1229/omnishelf/internal/ownership"
 )
 
 // Media types stored in TrackingItem.Type.
@@ -32,14 +33,17 @@ const (
 	TypeBook  = "BOOK"
 	TypeGame  = "GAME"
 	TypeMovie = "MOVIE"
+	TypeMusic = "MUSIC"
 )
 
-// Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING.
-// COMPLETED, PLAN_TO ("not started") and STOPPED (dropped) apply to all.
+// Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING;
+// music uses LISTENING. COMPLETED, PLAN_TO ("not started") and STOPPED
+// (dropped) apply to all.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
 	StatusPlaying   = "PLAYING"
+	StatusListening = "LISTENING"
 	StatusCompleted = "COMPLETED"
 	StatusPlanTo    = "PLAN_TO"
 	StatusStopped   = "STOPPED"
@@ -64,6 +68,9 @@ var (
 	ErrInvalidProgress = errors.New("books: invalid progress")
 	// ErrInvalidRating means a rating outside the 0–5 range.
 	ErrInvalidRating = errors.New("books: invalid rating")
+	// ErrInvalidOwnership means an ownership format not valid for the item's type
+	// (or set on a type that has no ownership vocabulary).
+	ErrInvalidOwnership = errors.New("books: invalid ownership")
 	// ErrEmptyUpdate means a PATCH carried no updatable fields.
 	ErrEmptyUpdate = errors.New("books: no fields to update")
 	// ErrInvalidFilter means an unknown type/status library filter value.
@@ -235,7 +242,7 @@ func (s *Service) Track(ctx context.Context, userID, bookID uint, status string)
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie {
+	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie && typ != TypeMusic {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
 	}
 	if status != "" && !isKnownStatus(status) {
@@ -267,6 +274,8 @@ type LibraryEntry struct {
 	PageCount   int    // books only
 	Description string // books only
 	Platform    string // games only
+	Artist      string // music only
+	Year        int    // music only
 }
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
@@ -282,6 +291,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var movieTMDBIDs []int
 	var isbns []string
 	var barcodes []string
+	var albumExtIDs []string
 	for _, it := range items {
 		switch it.Type {
 		case TypeTV:
@@ -296,6 +306,8 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			isbns = append(isbns, it.ExternalID)
 		case TypeGame:
 			barcodes = append(barcodes, it.ExternalID)
+		case TypeMusic:
+			albumExtIDs = append(albumExtIDs, it.ExternalID)
 		}
 	}
 
@@ -339,6 +351,16 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			moviesByTMDB[strconv.Itoa(m.TMDBID)] = m
 		}
 	}
+	albumsByExtID := map[string]models.Album{}
+	if len(albumExtIDs) > 0 {
+		var rows []models.Album
+		if err := s.db.WithContext(ctx).Where("external_id IN ?", albumExtIDs).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading album metadata: %w", err)
+		}
+		for _, a := range rows {
+			albumsByExtID[a.ExternalID] = a
+		}
+	}
 
 	out := make([]LibraryEntry, 0, len(items))
 	for i := range items {
@@ -368,6 +390,12 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.ArtworkPath = m.PosterPath
 				entry.Description = m.Overview
 			}
+		case TypeMusic:
+			if a, ok := albumsByExtID[it.ExternalID]; ok {
+				entry.ArtworkPath = a.CoverPath
+				entry.Artist = a.Artist
+				entry.Year = a.Year
+			}
 		}
 		out = append(out, entry)
 	}
@@ -378,8 +406,8 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 // Status must be valid for the item's media type; progress is a
 // page number and only meaningful for books (TV progress is derived from
 // EpisodeWatch rows, never stored).
-func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress, rating *int) (*models.TrackingItem, error) {
-	if status == nil && progress == nil && rating == nil {
+func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress, rating *int, ownershipFormats *[]string) (*models.TrackingItem, error) {
+	if status == nil && progress == nil && rating == nil && ownershipFormats == nil {
 		return nil, ErrEmptyUpdate
 	}
 
@@ -408,6 +436,12 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 			return nil, fmt.Errorf("%w: rating must be between 0 and 5", ErrInvalidRating)
 		}
 		item.Rating = *rating
+	}
+	if ownershipFormats != nil {
+		if err := ownership.Validate(item.Type, *ownershipFormats); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidOwnership, err)
+		}
+		item.Ownership = ownership.Normalize(item.Type, *ownershipFormats)
 	}
 
 	if err := s.db.WithContext(ctx).Save(item).Error; err != nil {
@@ -493,6 +527,8 @@ func validStatus(typ, status string) bool {
 		return typ == TypeBook
 	case StatusPlaying:
 		return typ == TypeGame
+	case StatusListening:
+		return typ == TypeMusic
 	default:
 		return false
 	}
@@ -501,7 +537,8 @@ func validStatus(typ, status string) bool {
 // isKnownStatus reports whether status is any valid tracking status (used
 // for the type-agnostic library filter).
 func isKnownStatus(status string) bool {
-	return validStatus(TypeTV, status) || validStatus(TypeBook, status)
+	return validStatus(TypeTV, status) || validStatus(TypeBook, status) ||
+		validStatus(TypeGame, status) || validStatus(TypeMusic, status)
 }
 
 // normalizeISBN13 strips hyphens/spaces and validates ISBN-13 shape:

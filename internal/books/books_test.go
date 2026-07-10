@@ -273,41 +273,51 @@ func TestUpdateItem(t *testing.T) {
 	intPtr := func(i int) *int { return &i }
 
 	// Book: status + page progress.
-	updated, err := svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusCompleted), intPtr(320), nil)
+	updated, err := svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusCompleted), intPtr(320), nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, StatusCompleted, updated.Status)
 	assert.Equal(t, 320, updated.Progress)
 
 	// TV: valid status change.
-	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusPlanTo), nil, nil)
+	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusPlanTo), nil, nil, nil)
 	require.NoError(t, err)
 	assert.Equal(t, StatusPlanTo, updated.Status)
 
 	// Rating: a 1–5 self-rating on either media type.
-	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, nil, intPtr(4))
+	updated, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, nil, intPtr(4), nil)
 	require.NoError(t, err)
 	assert.Equal(t, 4, updated.Rating)
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, intPtr(6))
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, intPtr(6), nil)
 	assert.ErrorIs(t, err, ErrInvalidRating, "rating is capped at 5")
 
 	// Invalid status per type.
-	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusReading), nil, nil)
+	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, strPtr(StatusReading), nil, nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidStatus, "READING is not a TV status")
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusWatching), nil, nil)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, strPtr(StatusWatching), nil, nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidStatus, "WATCHING is not a book status")
 
 	// Progress rules.
-	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, intPtr(5), nil)
+	_, err = svc.UpdateItem(ctx, 1, tvItem.ID, nil, intPtr(5), nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidProgress, "TV progress is derived, not stored")
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, intPtr(-1), nil)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, intPtr(-1), nil, nil)
 	assert.ErrorIs(t, err, ErrInvalidProgress)
 
+	// Ownership: multi-select over the fixed set, music only.
+	musicItem := seedItem(t, gdb, 1, TypeMusic, "mb:abc", StatusListening)
+	updated, err = svc.UpdateItem(ctx, 1, musicItem.ID, nil, nil, nil, &[]string{"CD", "Vinyl"})
+	require.NoError(t, err)
+	assert.Equal(t, "Vinyl,CD", updated.Ownership, "stored in allowed order")
+	_, err = svc.UpdateItem(ctx, 1, musicItem.ID, nil, nil, nil, &[]string{"Cassette"})
+	assert.ErrorIs(t, err, ErrInvalidOwnership, "Cassette is not a music format")
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, nil, &[]string{"CD"})
+	assert.ErrorIs(t, err, ErrInvalidOwnership, "books have no ownership vocabulary")
+
 	// Empty patch.
-	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, nil)
+	_, err = svc.UpdateItem(ctx, 1, bookItem.ID, nil, nil, nil, nil)
 	assert.ErrorIs(t, err, ErrEmptyUpdate)
 
 	// Cross-user: user 2 must see user 1's item as missing (no leak).
-	_, err = svc.UpdateItem(ctx, 2, bookItem.ID, strPtr(StatusPlanTo), nil, nil)
+	_, err = svc.UpdateItem(ctx, 2, bookItem.ID, strPtr(StatusPlanTo), nil, nil, nil)
 	assert.ErrorIs(t, err, ErrItemNotFound)
 }
 

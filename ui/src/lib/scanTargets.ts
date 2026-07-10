@@ -2,6 +2,8 @@ import { scanBook, trackBook } from '../api/books'
 import type { BookStatus } from '../api/books'
 import { scanGame, trackGame } from '../api/games'
 import type { GameStatus } from '../api/games'
+import { scanAlbum, trackAlbum } from '../api/music'
+import type { MusicStatus } from '../api/music'
 import type { ScanTarget } from '../components/books/BulkScanner'
 
 /** Books: ISBN → OpenLibrary; subtitle is the author list. */
@@ -41,4 +43,24 @@ export const gameScanTarget: ScanTarget<GameStatus> = {
     return { id: g.id, title: g.title, subtitle: g.platform, coverPath: g.coverPath }
   },
   track: (id, status) => trackGame(id, status),
+}
+
+/** Music: UPC/EAN → Discogs; subtitle is the artist. */
+export const musicScanTarget: ScanTarget<MusicStatus> = {
+  noun: 'album',
+  codeNoun: 'barcode',
+  inputLabel: 'Scan album barcode',
+  placeholder: 'Scan or type a barcode, then Enter',
+  statuses: [
+    { value: 'LISTENING', label: 'Listening' },
+    { value: 'PLAN_TO', label: 'Plan to listen' },
+    { value: 'COMPLETED', label: 'Listened' },
+    { value: 'STOPPED', label: 'Set aside' },
+  ],
+  defaultStatus: 'LISTENING',
+  scan: async (code) => {
+    const a = await scanAlbum(code)
+    return { id: a.id, title: a.title, subtitle: a.artist, coverPath: a.coverPath }
+  },
+  track: (id, status) => trackAlbum(id, status),
 }
