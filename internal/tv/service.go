@@ -763,8 +763,13 @@ func (s *Service) episode(ctx context.Context, id uint) (*models.Episode, error)
 // no EpisodeWatch row for the user. Returns nil (no error) when none exists.
 func (s *Service) nextUp(ctx context.Context, userID, showID uint) (*models.Episode, error) {
 	var ep models.Episode
+	// Season 0 holds specials, which are excluded from both the next-up card and
+	// the auto-complete calculation: a show counts as fully watched once every
+	// aired, non-special episode is seen. Only AIRED episodes count, so an
+	// announced-but-unaired episode never blocks (or reverts) COMPLETED until it
+	// actually airs.
 	err := s.db.WithContext(ctx).
-		Where("show_id = ? AND air_date IS NOT NULL AND air_date <= ?", showID, time.Now()).
+		Where("show_id = ? AND season <> 0 AND air_date IS NOT NULL AND air_date <= ?", showID, time.Now()).
 		Where("NOT EXISTS (SELECT 1 FROM episode_watches w WHERE w.episode_id = episodes.id AND w.user_id = ?)", userID).
 		Order("season, number").
 		First(&ep).Error

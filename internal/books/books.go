@@ -535,6 +535,12 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 		if !validStatus(item.Type, *status) {
 			return nil, fmt.Errorf("%w: %q is not valid for type %s", ErrInvalidStatus, *status, item.Type)
 		}
+		// TV COMPLETED is system-derived from watched episodes (see
+		// tv.reconcileStatus), never a manual action — the only manual TV stop is
+		// STOPPED. Reject a client attempt to set it directly.
+		if item.Type == TypeTV && *status == StatusCompleted {
+			return nil, fmt.Errorf("%w: TV completion is derived from watched episodes, not set manually", ErrInvalidStatus)
+		}
 		item.Status = *status
 	}
 	if progress != nil {

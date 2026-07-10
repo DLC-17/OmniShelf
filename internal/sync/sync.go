@@ -266,8 +266,10 @@ func reconcileCompletedToWatching(db *gorm.DB, showID uint, tmdbID int) error {
 	now := time.Now()
 	for _, it := range items {
 		var count int64
+		// Season 0 (specials) is excluded, mirroring the completion rule in
+		// tv.nextUp: a show stays COMPLETED even if an aired special is unwatched.
 		if err := db.Model(&models.Episode{}).
-			Where("show_id = ? AND air_date IS NOT NULL AND air_date <= ?", showID, now).
+			Where("show_id = ? AND season <> 0 AND air_date IS NOT NULL AND air_date <= ?", showID, now).
 			Where("NOT EXISTS (SELECT 1 FROM episode_watches w WHERE w.episode_id = episodes.id AND w.user_id = ?)", it.UserID).
 			Count(&count).Error; err != nil {
 			return fmt.Errorf("count unwatched for user %d: %w", it.UserID, err)

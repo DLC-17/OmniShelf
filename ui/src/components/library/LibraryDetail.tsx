@@ -211,7 +211,9 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
                 onChange={(e) => runUpdate({ status: e.target.value as ItemStatus })}
               >
                 {statuses.map((s) => (
-                  <option key={s} value={s}>
+                  // TV COMPLETED is system-derived from watched episodes, so it
+                  // shows when reached but can't be chosen manually (only STOPPED is).
+                  <option key={s} value={s} disabled={isTV && s === 'COMPLETED'}>
                     {s}
                   </option>
                 ))}
