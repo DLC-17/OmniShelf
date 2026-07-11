@@ -11,6 +11,7 @@ import { useLibrary } from '../hooks/useLibrary'
 import ShowSearch from '../components/tv/ShowSearch'
 import GameSearch from '../components/games/GameSearch'
 import BookSearch from '../components/books/BookSearch'
+import { formatUsd } from '../lib/currency'
 
 const TABS: { value: MediaType; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
@@ -18,10 +19,12 @@ const TABS: { value: MediaType; label: string }[] = [
   { value: 'GAME', label: 'Games' },
   { value: 'MOVIE', label: 'Movies' },
   { value: 'MUSIC', label: 'Music' },
+  { value: 'CARD', label: 'Cards' },
 ]
 
-/** The "active" status and its label for each media type. */
-const ACTIVE: Record<MediaType, { status: ItemStatus; label: string; stopped: string }> = {
+/** The "active" status and its label for each media type with a lifecycle
+ * (cards are simply OWNED and have their own single section). */
+const ACTIVE: Record<Exclude<MediaType, 'CARD'>, { status: ItemStatus; label: string; stopped: string }> = {
   TV: { status: 'WATCHING', label: 'Watching', stopped: 'Stopped watching' },
   BOOK: { status: 'READING', label: 'Reading', stopped: 'Stopped reading' },
   GAME: { status: 'PLAYING', label: 'Playing', stopped: 'Stopped playing' },
@@ -48,8 +51,49 @@ function groupByArtist(items: LibraryItem[]): { artist: string; albums: LibraryI
     }))
 }
 
+/** The TCG a card belongs to, derived from its source-prefixed external id
+ * ("ygo:LOB-001" / "ptcg:base1-46"). */
+function cardGameLabel(item: LibraryItem): string {
+  if (item.externalId.startsWith('ygo:')) return 'Yu-Gi-Oh!'
+  if (item.externalId.startsWith('ptcg:')) return 'Pokémon'
+  return 'Other'
+}
+
+/** Groups cards by TCG, then within each game by set (platform carries the
+ * set name, falling back to the printed set code). Games and sets are ordered
+ * alphabetically; each set's cards are ordered by collector number then
+ * title. Cards with no set fall under "Unknown set". */
+function groupByGameAndSet(
+  items: LibraryItem[],
+): { game: string; sets: { set: string; cards: LibraryItem[] }[] }[] {
+  const byGame = new Map<string, Map<string, LibraryItem[]>>()
+  for (const item of items) {
+    const game = cardGameLabel(item)
+    const set = item.platform.trim() === '' ? 'Unknown set' : item.platform
+    const sets = byGame.get(game) ?? new Map<string, LibraryItem[]>()
+    byGame.set(game, sets)
+    const bucket = sets.get(set)
+    if (bucket) bucket.push(item)
+    else sets.set(set, [item])
+  }
+  const numberOf = (i: LibraryItem) => parseInt(i.setCode, 10)
+  const alpha = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+  return [...byGame.entries()].sort(([a], [b]) => alpha(a, b)).map(([game, sets]) => ({
+    game,
+    sets: [...sets.entries()].sort(([a], [b]) => alpha(a, b)).map(([set, cards]) => ({
+      set,
+      cards: [...cards].sort((a, b) => {
+        const an = numberOf(a)
+        const bn = numberOf(b)
+        if (!Number.isNaN(an) && !Number.isNaN(bn) && an !== bn) return an - bn
+        return alpha(a.title, b.title)
+      }),
+    })),
+  }))
+}
+
 /** Status sections shown in order, with media-specific labels. */
-function sectionsFor(media: MediaType): { status: ItemStatus; label: string }[] {
+function sectionsFor(media: Exclude<MediaType, 'CARD'>): { status: ItemStatus; label: string }[] {
   const active = ACTIVE[media]
   return [
     { status: active.status, label: active.label },
@@ -170,7 +214,9 @@ export default function Library() {
             ? 'No movies yet. Search for one below to start your watchlist.'
             : media === 'MUSIC'
               ? 'No albums yet. Scan a barcode or search by name above to start your collection.'
-              : 'No items match these filters. Add a show from Up Next or scan a book to start building your shelf.'}
+              : media === 'CARD'
+                ? 'No cards yet. Photograph one from the Scan page to start your collection.'
+                : 'No items match these filters. Add a show from Up Next or scan a book to start building your shelf.'}
         </p>
       )}
       
@@ -215,7 +261,54 @@ export default function Library() {
           )
         })}
 
+      {media === 'CARD' &&
+        visible.length > 0 &&
+        groupByGameAndSet(visible).map(({ game, sets }) => (
+          <section key={game} aria-label={game}>
+            <h2>{game}</h2>
+            {sets.map(({ set, cards }) => {
+              // Collapse keys are game-qualified so same-named sets in two
+              // TCGs never toggle together.
+              const sectionKey = `${game} · ${set}` as ItemStatus
+              const open = !collapsed.has(sectionKey)
+              return (
+                <section key={set} className="library-section">
+                  <button
+                    type="button"
+                    className="library-section-title"
+                    aria-expanded={open}
+                    onClick={() => toggleSection(sectionKey)}
+                  >
+                    <span className="show-caret" aria-hidden="true">{open ? '▾' : '▸'}</span>
+                    {set} <span className="badge">{cards.length}</span>
+                  </button>
+                  {open && (
+                    <ul className="cover-grid">
+                      {cards.map((item) => (
+                        <li key={item.id}>
+                          <button
+                            type="button"
+                            className="cover-tile"
+                            aria-label={`Open ${item.title}`}
+                            onClick={() => setSelectedId(item.id)}
+                          >
+                            <Poster posterPath={item.artworkPath} title={item.title} width={140} height={195} />
+                            <span className="cover-title">{item.title}</span>
+                            {item.setCode !== '' && <span className="meta">{item.setCode}</span>}
+                            {item.price > 0 && <span className="meta">{formatUsd(item.price)}</span>}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+              )
+            })}
+          </section>
+        ))}
+
       {media !== 'MUSIC' &&
+        media !== 'CARD' &&
         visible.length > 0 &&
         sectionsFor(media).map(({ status, label }) => {
           const sectionItems = visible.filter((i) => i.status === status)
@@ -246,6 +339,9 @@ export default function Library() {
                         <span className="cover-title">{item.title}</span>
                         {item.type === 'BOOK' && item.pageCount > 0 && (
                           <span className="meta">{item.pageCount} pages</span>
+                        )}
+                        {item.type === 'CARD' && item.price > 0 && (
+                          <span className="meta">{formatUsd(item.price)}</span>
                         )}
                       </button>
                     </li>

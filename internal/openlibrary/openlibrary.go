@@ -88,7 +88,7 @@ type Book struct {
 	Authors     []string
 	Description string
 	PageCount   int
-	CoverID     int      // OpenLibrary cover ID; 0 = no cover known
+	CoverID     int // OpenLibrary cover ID; 0 = no cover known
 	WorkKey     string
 	Subjects    []string // OpenLibrary work subjects (source-derived tags); may be empty
 }
@@ -186,12 +186,13 @@ func (c *Client) GetByISBN(ctx context.Context, isbn string) (*Book, error) {
 // TitleResult is one work returned by a title search. A work groups together
 // all editions of a book; the caller lists its editions to pick an ISBN.
 type TitleResult struct {
-	WorkKey      string // OpenLibrary work key, e.g. "/works/OL45804W"
-	Title        string
-	Authors      []string
-	FirstYear    int // first publication year; 0 when unknown
-	CoverID      int // OpenLibrary cover ID; 0 = no cover known
-	EditionCount int
+	WorkKey       string // OpenLibrary work key, e.g. "/works/OL45804W"
+	Title         string
+	Authors       []string
+	FirstYear     int    // first publication year; 0 when unknown
+	CoverID       int    // OpenLibrary cover ID; 0 = no cover known
+	FirstSentence string // opening sentence of the work; "" when OpenLibrary has none
+	EditionCount  int
 }
 
 // Edition is one ISBN-bearing edition of a work, for the ISBN picker.
@@ -211,6 +212,7 @@ type searchResponse struct {
 		FirstPublishYear int      `json:"first_publish_year"`
 		CoverI           int      `json:"cover_i"`
 		EditionCount     int      `json:"edition_count"`
+		FirstSentence    []string `json:"first_sentence"`
 	} `json:"docs"`
 }
 
@@ -240,7 +242,7 @@ func (c *Client) SearchBySubject(ctx context.Context, subject string) ([]TitleRe
 // or subject) and maps the docs to TitleResults. The fields and limit are shared
 // so title/author/subject searches differ only in their selector parameter.
 func (c *Client) searchWorks(ctx context.Context, q url.Values) ([]TitleResult, error) {
-	q.Set("fields", "key,title,author_name,first_publish_year,cover_i,edition_count")
+	q.Set("fields", "key,title,author_name,first_publish_year,cover_i,edition_count,first_sentence")
 	q.Set("limit", "20")
 	var resp searchResponse
 	if err := c.getJSON(ctx, "/search.json?"+q.Encode(), &resp); err != nil {
@@ -248,13 +250,18 @@ func (c *Client) searchWorks(ctx context.Context, q url.Values) ([]TitleResult, 
 	}
 	results := make([]TitleResult, 0, len(resp.Docs))
 	for _, d := range resp.Docs {
+		first := ""
+		if len(d.FirstSentence) > 0 {
+			first = d.FirstSentence[0]
+		}
 		results = append(results, TitleResult{
-			WorkKey:      d.Key,
-			Title:        d.Title,
-			Authors:      d.AuthorName,
-			FirstYear:    d.FirstPublishYear,
-			CoverID:      d.CoverI,
-			EditionCount: d.EditionCount,
+			WorkKey:       d.Key,
+			Title:         d.Title,
+			Authors:       d.AuthorName,
+			FirstYear:     d.FirstPublishYear,
+			CoverID:       d.CoverI,
+			FirstSentence: first,
+			EditionCount:  d.EditionCount,
 		})
 	}
 	return results, nil

@@ -7,12 +7,19 @@
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
+  /**
+   * The parsed error envelope, including any endpoint-specific fields beyond
+   * {error, message} (e.g. the card scanner's card_not_found setCode). {} when
+   * the body was not a JSON object.
+   */
+  readonly details: Record<string, unknown>
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, details: Record<string, unknown> = {}) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -35,9 +42,28 @@ export interface RequestOptions {
   skipUnauthorizedHandler?: boolean
 }
 
-interface ErrorEnvelope {
-  error?: string
-  message?: string
+/**
+ * Parses the standard error envelope ({"error": "code", "message": "text"},
+ * plus any endpoint-specific extras) off a failed response, tolerating
+ * non-JSON bodies (e.g. proxy error pages).
+ */
+async function parseErrorEnvelope(
+  res: Response,
+): Promise<{ code: string; message: string; details: Record<string, unknown> }> {
+  let code = 'unknown_error'
+  let message = `Request failed with status ${res.status}`
+  let details: Record<string, unknown> = {}
+  try {
+    const envelope: unknown = await res.json()
+    if (envelope !== null && typeof envelope === 'object' && !Array.isArray(envelope)) {
+      details = envelope as Record<string, unknown>
+      if (typeof details.error === 'string') code = details.error
+      if (typeof details.message === 'string') message = details.message
+    }
+  } catch {
+    // Non-JSON error body; keep the fallback values.
+  }
+  return { code, message, details }
 }
 
 /**
@@ -54,20 +80,12 @@ export async function requestUpload<T>(path: string, form: FormData, method = 'P
     return text === '' ? (undefined as T) : (JSON.parse(text) as T)
   }
 
-  let code = 'unknown_error'
-  let message = `Request failed with status ${res.status}`
-  try {
-    const envelope = (await res.json()) as ErrorEnvelope
-    if (typeof envelope.error === 'string') code = envelope.error
-    if (typeof envelope.message === 'string') message = envelope.message
-  } catch {
-    // Non-JSON error body; keep the fallback values.
-  }
+  const { code, message, details } = await parseErrorEnvelope(res)
 
   if (res.status === 401 && unauthorizedHandler !== null) {
     unauthorizedHandler()
   }
-  throw new ApiError(res.status, code, message)
+  throw new ApiError(res.status, code, message, details)
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -88,20 +106,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     return JSON.parse(text) as T
   }
 
-  // Parse the standard error envelope: {"error": "code", "message": "text"}.
-  let code = 'unknown_error'
-  let message = `Request failed with status ${res.status}`
-  try {
-    const envelope = (await res.json()) as ErrorEnvelope
-    if (typeof envelope.error === 'string') code = envelope.error
-    if (typeof envelope.message === 'string') message = envelope.message
-  } catch {
-    // Non-JSON error body (e.g. proxy error page); keep the fallback values.
-  }
+  const { code, message, details } = await parseErrorEnvelope(res)
 
   if (res.status === 401 && !skipUnauthorizedHandler && unauthorizedHandler !== null) {
     unauthorizedHandler()
   }
 
-  throw new ApiError(res.status, code, message)
+  throw new ApiError(res.status, code, message, details)
 }

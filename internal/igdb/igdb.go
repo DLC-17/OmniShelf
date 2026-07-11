@@ -268,6 +268,7 @@ type SimilarGame struct {
 	Name         string
 	Year         int    // first release year; 0 when unknown
 	CoverImageID string // IGDB image_id; "" when no cover
+	Summary      string // IGDB summary; "" when the game has none
 }
 
 // similarPayload models one /games entry expanded with its similar_games. IGDB
@@ -279,6 +280,7 @@ type similarPayload struct {
 		ID               int    `json:"id"`
 		Name             string `json:"name"`
 		FirstReleaseDate int64  `json:"first_release_date"`
+		Summary          string `json:"summary"`
 		Cover            struct {
 			ImageID string `json:"image_id"`
 		} `json:"cover"`
@@ -305,7 +307,7 @@ func (c *Client) SimilarGames(ctx context.Context, seedIDs []int) (map[int][]Sim
 	}
 
 	body := fmt.Sprintf(
-		"fields similar_games.name,similar_games.first_release_date,similar_games.cover.image_id; where id = (%s); limit %d;",
+		"fields similar_games.name,similar_games.first_release_date,similar_games.summary,similar_games.cover.image_id; where id = (%s); limit %d;",
 		joinInts(seedIDs), len(seedIDs),
 	)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
@@ -345,6 +347,7 @@ func (c *Client) SimilarGames(ctx context.Context, seedIDs []int) (map[int][]Sim
 				Name:         sg.Name,
 				Year:         year,
 				CoverImageID: sg.Cover.ImageID,
+				Summary:      sg.Summary,
 			})
 		}
 		out[p.ID] = similar

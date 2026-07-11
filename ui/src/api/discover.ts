@@ -53,6 +53,8 @@ export interface GameDiscoverItem {
   year: number
   /** Relative path under /images; empty string means "use the placeholder". */
   coverPath: string
+  /** IGDB summary; '' when the game has none. */
+  summary: string
   /** Title of the tracked game this was suggested from. */
   suggestedBy: string
 }
@@ -79,6 +81,8 @@ export interface BookDiscoverItem {
   year: number
   /** Relative path under /images; empty string means "use the placeholder". */
   coverPath: string
+  /** The work's opening sentence; '' when OpenLibrary has none. */
+  summary: string
   /** "books by <author>" or an OpenLibrary subject. */
   suggestedBy: string
 }

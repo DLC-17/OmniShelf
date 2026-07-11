@@ -36,16 +36,18 @@ const (
 	TypeGame  = "GAME"
 	TypeMovie = "MOVIE"
 	TypeMusic = "MUSIC"
+	TypeCard  = "CARD"
 )
 
 // Tracking statuses. Books use READING; TV uses WATCHING; games use PLAYING;
-// music uses LISTENING. COMPLETED, PLAN_TO ("not started") and STOPPED
-// (dropped) apply to all.
+// music uses LISTENING; cards use OWNED (a card on the shelf is a card you
+// own). COMPLETED, PLAN_TO ("not started") and STOPPED (dropped) apply to all.
 const (
 	StatusWatching  = "WATCHING"
 	StatusReading   = "READING"
 	StatusPlaying   = "PLAYING"
 	StatusListening = "LISTENING"
+	StatusOwned     = "OWNED"
 	StatusCompleted = "COMPLETED"
 	StatusPlanTo    = "PLAN_TO"
 	StatusStopped   = "STOPPED"
@@ -310,7 +312,7 @@ func (s *Service) ListEditions(ctx context.Context, workKey string) ([]openlibra
 // ListItems returns the user's tracking items, optionally filtered by type
 // ("TV"/"BOOK") and status, newest activity first.
 func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie && typ != TypeMusic {
+	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie && typ != TypeMusic && typ != TypeCard {
 		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
 	}
 	if status != "" && !isKnownStatus(status) {
@@ -341,9 +343,11 @@ type LibraryEntry struct {
 	Authors     string   // books only
 	PageCount   int      // books only
 	Description string   // books only
-	Platform    string   // games only
-	Artist      string   // music only
+	Platform    string   // games: platform; cards: set name (or printed set code)
+	Artist      string   // music: artist; cards: illustrator credit
 	Year        int      // music only
+	Price       float64  // cards only: market price at scan time
+	SetCode     string   // cards only: printed set/collector code, e.g. "LOB-001" or "10/182"
 	Tags        []string // source-derived tags/keywords; never nil (empty when none)
 	Ownership   []string // user-selected ownership formats (games/music); never nil
 }
@@ -362,6 +366,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var isbns []string
 	var gameIGDBIDs []int
 	var albumExtIDs []string
+	var cardExtIDs []string
 	for _, it := range items {
 		switch it.Type {
 		case TypeTV:
@@ -383,6 +388,8 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			}
 		case TypeMusic:
 			albumExtIDs = append(albumExtIDs, it.ExternalID)
+		case TypeCard:
+			cardExtIDs = append(cardExtIDs, it.ExternalID)
 		}
 	}
 
@@ -436,6 +443,16 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			albumsByExtID[a.ExternalID] = a
 		}
 	}
+	cardsByExtID := map[string]models.Card{}
+	if len(cardExtIDs) > 0 {
+		var rows []models.Card
+		if err := s.db.WithContext(ctx).Where("external_id IN ?", cardExtIDs).Find(&rows).Error; err != nil {
+			return nil, fmt.Errorf("loading card metadata: %w", err)
+		}
+		for _, cd := range rows {
+			cardsByExtID[cd.ExternalID] = cd
+		}
+	}
 
 	out := make([]LibraryEntry, 0, len(items))
 	// mediaKey records the shared cache-row primary key backing each entry, so
@@ -479,6 +496,24 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				entry.Artist = a.Artist
 				entry.Year = a.Year
 			}
+		case TypeCard:
+			if cd, ok := cardsByExtID[it.ExternalID]; ok {
+				entry.ArtworkPath = cd.CoverPath
+				// Cards reuse the games' Platform slot for their set (name
+				// when the catalog provides one, else the printed set code),
+				// the music Artist slot for the illustrator credit, and
+				// Description for the full type/set/artist line. SetCode is
+				// the display collector code ("10/182", leading zeros
+				// dropped) the grid shows and the UI groups sets by.
+				entry.Platform = cd.SetName
+				if entry.Platform == "" {
+					entry.Platform = cd.SetCode
+				}
+				entry.Artist = cd.Artist
+				entry.SetCode = displayCardCode(cd.SetCode)
+				entry.Description = cardDescription(&cd)
+				entry.Price = cd.Price
+			}
 		}
 		if mediaKey[i] != 0 {
 			tagIDsByType[it.Type] = append(tagIDsByType[it.Type], mediaKey[i])
@@ -514,7 +549,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	ownItemIDs := map[string][]uint{}
 	for i := range out {
 		switch out[i].Item.Type {
-		case TypeGame, TypeMusic:
+		case TypeGame, TypeMusic, TypeCard:
 			ownItemIDs[out[i].Item.Type] = append(ownItemIDs[out[i].Item.Type], out[i].Item.ID)
 		}
 	}
@@ -703,6 +738,7 @@ type DiscoverItem struct {
 	Authors     string // comma-joined
 	Year        int    // first publication year; 0 when unknown
 	CoverPath   string
+	Summary     string // the work's opening sentence; "" when OpenLibrary has none
 	SuggestedBy string // "books by <author>" or an OpenLibrary subject
 }
 
@@ -818,6 +854,7 @@ func (s *Service) appendDiscoverCandidates(ctx context.Context, works []openlibr
 			Authors:     strings.Join(w.Authors, ", "),
 			Year:        w.FirstYear,
 			CoverPath:   s.discoverCover(ctx, w.CoverID),
+			Summary:     w.FirstSentence,
 			SuggestedBy: suggestedBy,
 		})
 	}
@@ -919,6 +956,53 @@ func (s *Service) RejectRec(ctx context.Context, userID uint, workKey string) er
 	return nil
 }
 
+// cardTypeLine renders a card's type and (for Yu-Gi-Oh!) race as one display
+// string, e.g. "Normal Monster · Dragon" or "Pokémon — Stage 2".
+func cardTypeLine(cd *models.Card) string {
+	switch {
+	case cd.Race == "":
+		return cd.CardType
+	case cd.CardType == "":
+		return cd.Race
+	default:
+		return cd.CardType + " · " + cd.Race
+	}
+}
+
+// displayCardCode renders a card's printed code for display: a Pokémon
+// collector number drops the leading zeros ("010/182" → "10/182"); anything
+// else (Yu-Gi-Oh! set codes) passes through unchanged.
+func displayCardCode(code string) string {
+	num, total, found := strings.Cut(code, "/")
+	if !found {
+		return code
+	}
+	trimmed := strings.TrimLeft(num, "0")
+	if trimmed == "" {
+		trimmed = "0"
+	}
+	return trimmed + "/" + total
+}
+
+// cardDescription renders the card detail line: type/race, the set with its
+// display collector code, and the illustrator credit — e.g.
+// "Pokémon — Basic · Paradox Rift 10/182 · Illus. Saya Tsuruta". Absent
+// pieces are dropped.
+func cardDescription(cd *models.Card) string {
+	set := strings.TrimSpace(cd.SetName + " " + displayCardCode(cd.SetCode))
+	parts := []string{cardTypeLine(cd), set}
+	if cd.Artist != "" {
+		parts = append(parts, "Illus. "+cd.Artist)
+	}
+	nonEmpty := parts[:0]
+	for _, p := range parts {
+		if p != "" {
+			nonEmpty = append(nonEmpty, p)
+		}
+	}
+	return strings.Join(nonEmpty, " · ")
+}
+
 // splitAuthors splits a comma-joined author string ("A, B") into trimmed,
 // non-empty names.
 func splitAuthors(joined string) []string {
@@ -939,8 +1023,8 @@ func normalizeTitle(title string) string {
 }
 
 // validStatus reports whether status is allowed for the media type:
-// TV/MOVIE → WATCHING, BOOK → READING, GAME → PLAYING, plus the shared
-// COMPLETED/PLAN_TO/STOPPED for all.
+// TV/MOVIE → WATCHING, BOOK → READING, GAME → PLAYING, MUSIC → LISTENING,
+// CARD → OWNED, plus the shared COMPLETED/PLAN_TO/STOPPED for all.
 func validStatus(typ, status string) bool {
 	switch status {
 	case StatusCompleted, StatusPlanTo, StatusStopped:
@@ -953,6 +1037,8 @@ func validStatus(typ, status string) bool {
 		return typ == TypeGame
 	case StatusListening:
 		return typ == TypeMusic
+	case StatusOwned:
+		return typ == TypeCard
 	default:
 		return false
 	}
@@ -962,7 +1048,8 @@ func validStatus(typ, status string) bool {
 // for the type-agnostic library filter).
 func isKnownStatus(status string) bool {
 	return validStatus(TypeTV, status) || validStatus(TypeBook, status) ||
-		validStatus(TypeGame, status) || validStatus(TypeMusic, status)
+		validStatus(TypeGame, status) || validStatus(TypeMusic, status) ||
+		validStatus(TypeCard, status)
 }
 
 // normalizeISBN13 strips hyphens/spaces and validates ISBN-13 shape:

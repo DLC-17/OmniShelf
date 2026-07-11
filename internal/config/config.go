@@ -48,6 +48,15 @@ type Config struct {
 	// clear "not configured" error for scans instead of failing startup;
 	// MusicBrainz name search (which needs no key) still works.
 	DiscogsToken string
+	// GoogleVisionCredentials is the path to a Google Cloud service-account
+	// JSON file for Vision OCR (GOOGLE_APPLICATION_CREDENTIALS). Optional: when
+	// unset the cards module returns a clear "not configured" error for scans
+	// instead of failing startup.
+	GoogleVisionCredentials string
+	// PokemonTCGAPIKey authenticates api.pokemontcg.io card lookups
+	// (POKEMONTCG_API_KEY). Optional: the API works keyless at lower rate
+	// limits.
+	PokemonTCGAPIKey string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -69,6 +78,9 @@ func Load() (*Config, error) {
 		IGDBClientSecret: os.Getenv("IGDB_CLIENT_SECRET"),
 
 		DiscogsToken: os.Getenv("OMNISHELF_DISCOGS_TOKEN"),
+
+		GoogleVisionCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		PokemonTCGAPIKey:        os.Getenv("POKEMONTCG_API_KEY"),
 	}
 
 	if cfg.JWTSecret == "" {

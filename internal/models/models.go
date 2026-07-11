@@ -167,6 +167,25 @@ type Album struct {
 	MusicBrainzID string
 }
 
+// Card is the shared trading-card metadata cache (one row per card printing,
+// all users), fed by the photo-scan flow in internal/cards. ExternalID is a
+// source-prefixed key — "ygo:<SetCode>" for Yu-Gi-Oh! (YGOPRODeck, keyed by
+// the printed set code) or "ptcg:<card id>" for Pokémon (api.pokemontcg.io) —
+// reused verbatim as the CARD TrackingItem's ExternalID.
+type Card struct {
+	ID         uint   `gorm:"primaryKey"`
+	ExternalID string `gorm:"unique;not null"` // "ygo:<SetCode>" | "ptcg:<card id>"
+	Game       string `gorm:"not null"`        // "YUGIOH" | "POKEMON"
+	Name       string `gorm:"not null"`
+	CardType   string // e.g. "Normal Monster", "Pokémon — Stage 2"
+	Race       string // YGO race/attribute; "" for Pokémon
+	Artist     string // illustrator credit (Pokémon); "" when the source has none
+	SetCode    string
+	SetName    string
+	Price      float64 // market/tcgplayer price at scan time
+	CoverPath  string  // cached artwork, relative /images path
+}
+
 // ShowAlias remembers that an imported (normalized) series title resolved to a
 // TMDB id, so future imports of the same title skip the TMDB search entirely.
 type ShowAlias struct {
@@ -236,6 +255,7 @@ func All() []any {
 		&Game{},
 		&Movie{},
 		&Album{},
+		&Card{},
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},

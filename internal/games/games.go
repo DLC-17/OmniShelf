@@ -430,6 +430,7 @@ type DiscoverItem struct {
 	Title       string
 	Year        int
 	CoverPath   string
+	Summary     string // IGDB summary; "" when the game has none
 	SuggestedBy string // title of the tracked game this came from
 }
 
@@ -516,6 +517,7 @@ func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, er
 				Title:       sg.Name,
 				Year:        sg.Year,
 				CoverPath:   s.discoverCover(ctx, sg.ID, sg.CoverImageID),
+				Summary:     sg.Summary,
 				SuggestedBy: seedTitle[seedID],
 			})
 		}

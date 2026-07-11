@@ -38,6 +38,25 @@ var (
 	errBadCredentials = errors.New("unknown username or wrong password")
 )
 
+// dummyHash is a bcrypt hash of a fixed internal string, computed once at
+// process start. authenticate() compares against it when a username is not
+// found so that the "unknown username" and "wrong password" code paths take
+// statistically the same amount of time. Without this, the missing bcrypt
+// call on the not-found path is a timing side-channel: an attacker can
+// enumerate valid usernames purely from response latency even though both
+// cases return the identical error message and HTTP status.
+var dummyHash = mustDummyHash()
+
+func mustDummyHash() []byte {
+	h, err := bcrypt.GenerateFromPassword([]byte("omnishelf-timing-defense-fixed-value"), bcryptCost)
+	if err != nil {
+		// bcrypt only fails here on inputs longer than 72 bytes or an invalid
+		// cost; the literal above is fixed and short, so this is unreachable.
+		panic(fmt.Sprintf("generating dummy bcrypt hash: %v", err))
+	}
+	return h
+}
+
 type authHandler struct {
 	db      *gorm.DB
 	secret  []byte
@@ -225,11 +244,21 @@ func registerUser(ctx context.Context, gdb *gorm.DB, username, password, inviteC
 
 // authenticate verifies username/password, returning errBadCredentials for
 // both unknown users and wrong passwords (no username enumeration).
+//
+// When the username does not exist, a bcrypt comparison against dummyHash is
+// performed and discarded. This keeps the "unknown username" and "wrong
+// password" branches statistically indistinguishable by response time:
+// without it, the not-found path returns after a single indexed SELECT while
+// the wrong-password path additionally pays bcrypt's ~100 ms cost, creating
+// a timing side-channel that reveals valid usernames even when the error text
+// and HTTP status are identical for both cases.
 func authenticate(ctx context.Context, gdb *gorm.DB, username, password string) (*models.User, error) {
 	var user models.User
 	err := gdb.WithContext(ctx).Where("username = ?", username).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
+			//nolint:errcheck // timing defense only — result is intentionally discarded
+			bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 			return nil, errBadCredentials
 		}
 		return nil, fmt.Errorf("looking up user: %w", err)

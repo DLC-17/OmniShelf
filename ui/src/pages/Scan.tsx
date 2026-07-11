@@ -12,9 +12,10 @@ import ManualIsbnForm from '../components/books/ManualIsbnForm'
 // Aliased to prevent naming collision with our GameScan export below
 import GameCameraScan from '../components/games/GameScan'
 import MusicScan from '../components/music/MusicScan'
+import CardScan from '../components/cards/CardScan'
 
 type ScanMode = 'camera' | 'bulk'
-type ScanMedia = 'book' | 'game' | 'music'
+type ScanMedia = 'book' | 'game' | 'music' | 'card'
 
 // ─── EXPORTABLE STANDALONE COMPONENTS ───────────────────────────────────────
 
@@ -119,11 +120,21 @@ export default function Scan() {
         >
           Music
         </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={scanMedia === 'card'}
+          className={scanMedia === 'card' ? 'tab active' : 'tab'}
+          onClick={() => setScanMedia('card')}
+        >
+          Cards
+        </button>
       </div>
 
-      {/* Music and games are self-contained (own camera/handheld modes + confirm). */}
+      {/* Music, games and cards are self-contained (own capture modes + confirm). */}
       {scanMedia === 'music' && <MusicScan />}
       {scanMedia === 'game' && <GameCameraScan />}
+      {scanMedia === 'card' && <CardScan />}
 
       {scanMedia === 'book' && (
         <>

@@ -1,6 +1,6 @@
 import { request } from './client'
 
-export type MediaType = 'TV' | 'BOOK' | 'GAME' | 'MOVIE' | 'MUSIC'
+export type MediaType = 'TV' | 'BOOK' | 'GAME' | 'MOVIE' | 'MUSIC' | 'CARD'
 
 /** All statuses across every media type; per-type validity is enforced server-side. */
 export type ItemStatus =
@@ -8,6 +8,7 @@ export type ItemStatus =
   | 'READING'
   | 'PLAYING'
   | 'LISTENING'
+  | 'OWNED'
   | 'PLAN_TO'
   | 'COMPLETED'
   | 'STOPPED'
@@ -17,6 +18,8 @@ export const BOOK_STATUSES: ItemStatus[] = ['READING', 'PLAN_TO', 'COMPLETED', '
 export const GAME_STATUSES: ItemStatus[] = ['PLAYING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const MOVIE_STATUSES: ItemStatus[] = ['WATCHING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
 export const MUSIC_STATUSES: ItemStatus[] = ['LISTENING', 'PLAN_TO', 'COMPLETED', 'STOPPED']
+/** Cards have no watch/read lifecycle — they are simply owned. */
+export const CARD_STATUSES: ItemStatus[] = ['OWNED']
 
 /**
  * Fixed ownership-format option set for games (multi-select). The server
@@ -26,6 +29,9 @@ export const GAME_OWNERSHIP: string[] = ['Physical', 'GOG']
 
 /** Fixed ownership-format option set for music (multi-select: Vinyl, CD). */
 export const MUSIC_OWNERSHIP: string[] = ['Vinyl', 'CD']
+
+/** Fixed finish option set for cards (multi-select: Holo, Reverse Holo). */
+export const CARD_OWNERSHIP: string[] = ['Holo', 'Reverse Holo']
 
 export interface LibraryItem {
   id: number
@@ -47,9 +53,13 @@ export interface LibraryItem {
   description: string
   /** Games only. */
   platform: string
-  /** Music only. */
+  /** Music: artist. Cards: illustrator credit. */
   artist: string
   year: number
+  /** Cards only: market price in USD (0 when unknown). */
+  price: number
+  /** Cards only: display collector code, e.g. "10/182" or "LOB-001". */
+  setCode: string
   /** Source-derived tags/keywords (TMDB/IGDB/OpenLibrary); [] when none. */
   tags: string[]
   /** User-selected ownership formats (games: Physical/GOG; music: Vinyl/CD); [] when none. */

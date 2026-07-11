@@ -1,43 +1,54 @@
-# Go
+# Go / Binaries
 /omnishelf
 /omnishelf.exe
 *.exe
 *.test
 *.out
 
-# SQLite
-*.db
-*.db-wal
-*.db-shm
-
-# Node / frontend
+# Node / Frontend
 node_modules/
 ui/dist/*
 !ui/dist/.gitkeep
 
-# Env / local
+# Databases & App Data
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+/data/
+/images/
+
+# Environment Variables
 .env
-.env.local
+.env.*
+!.env.example
 
-# Editor/OS noise
-.DS_Store
-Thumbs.db
+# Secrets & Credentials
+*.pem
+*.key
+*-credentials.json
+*-serviceaccount.json
 
-# Local container run volumes
+# Local Container Volumes
 .run/
 
-# Up-to-speed onboarding doc (local, not versioned)
+# AI / Orchestration Artifacts
+.ai/
+.claude/
+.rocketride/
+.rundata
+ORCHESTRATION_LOG.md
+task_manifest.json
+project_spec.md
+Architecture.md
+
+# Up-to-speed onboarding doc (local)
 up-to-speed*
 up_to_speed*
 UP-TO-SPEED*
 UP_TO_SPEED*
 
-# Agentic / orchestration artifacts (not part of the published product)
-.ai/
-.claude/
-ORCHESTRATION_LOG.md
-task_manifest.json
-project_spec.md
-Architecture.md
-.rocketride/
-.rundata
+# Editor / OS Noise
+.DS_Store
+Thumbs.db

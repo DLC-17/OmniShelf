@@ -30,14 +30,18 @@ import (
 const (
 	TypeGame  = "GAME"
 	TypeMusic = "MUSIC"
+	TypeCard  = "CARD"
 )
 
-// Ownership format values. Games use Physical/GOG; music (#11) uses Vinyl/CD.
+// Ownership format values. Games use Physical/GOG; music (#11) uses Vinyl/CD;
+// cards use Holo/Reverse Holo (the printing finish of the owned copy).
 const (
-	FormatPhysical = "Physical"
-	FormatGOG      = "GOG"
-	FormatVinyl    = "Vinyl"
-	FormatCD       = "CD"
+	FormatPhysical    = "Physical"
+	FormatGOG         = "GOG"
+	FormatVinyl       = "Vinyl"
+	FormatCD          = "CD"
+	FormatHolo        = "Holo"
+	FormatReverseHolo = "Reverse Holo"
 )
 
 // allowedFormats is the FIXED option set per media type. It is the single
@@ -46,6 +50,7 @@ const (
 var allowedFormats = map[string][]string{
 	TypeGame:  {FormatPhysical, FormatGOG},
 	TypeMusic: {FormatVinyl, FormatCD},
+	TypeCard:  {FormatHolo, FormatReverseHolo},
 }
 
 // ErrInvalidFormat means a requested format is not in the allowed set for the

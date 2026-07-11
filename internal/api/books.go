@@ -128,6 +128,7 @@ func (h *booksHandler) discover(c *gin.Context) {
 			"authors":     it.Authors,
 			"year":        it.Year,
 			"coverPath":   it.CoverPath,
+			"summary":     it.Summary,
 			"suggestedBy": it.SuggestedBy,
 		})
 	}

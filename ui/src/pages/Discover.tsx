@@ -28,8 +28,12 @@ type DiscoverMedia = 'tv' | 'movie' | 'game' | 'book'
 interface Suggestion {
   key: string
   title: string
-  /** TV/movie synopsis, or a book's authors; games leave this blank. */
+  /** Brief summary: TV/movie synopsis, IGDB game summary, or a book's opening
+   * sentence. The card clamps it to a few lines so every media type renders
+   * the same on mobile and desktop. */
   overview: string
+  /** Secondary byline under the title: a book's authors; blank otherwise. */
+  subtitle: string
   year: string
   suggestedBy: string
   posterPath: string // TMDB path (hotlinked) for tv/movie; "" otherwise
@@ -110,6 +114,7 @@ export default function Discover() {
           key: String(i.tmdbId),
           title: i.title,
           overview: i.overview,
+          subtitle: '',
           year: yearFromDate(i.releaseDate),
           suggestedBy: i.suggestedBy,
           posterPath: i.posterPath,
@@ -122,7 +127,8 @@ export default function Discover() {
         return items.map((i) => ({
           key: String(i.igdbId),
           title: i.title,
-          overview: '',
+          overview: i.summary,
+          subtitle: '',
           year: yearFromInt(i.year),
           suggestedBy: i.suggestedBy,
           posterPath: '',
@@ -135,7 +141,8 @@ export default function Discover() {
         return items.map((i) => ({
           key: i.workKey,
           title: i.title,
-          overview: i.authors,
+          overview: i.summary,
+          subtitle: i.authors,
           year: yearFromInt(i.year),
           suggestedBy: i.suggestedBy,
           posterPath: '',
@@ -148,6 +155,7 @@ export default function Discover() {
         key: String(i.tmdbId),
         title: i.title,
         overview: i.overview,
+        subtitle: '',
         year: yearFromDate(i.firstAirDate),
         suggestedBy: i.suggestedBy,
         posterPath: i.posterPath,
@@ -250,6 +258,7 @@ export default function Discover() {
               <div className="grow">
                 <strong>{item.title}</strong>
                 {item.year !== '' && <span className="muted"> ({item.year})</span>}
+                {item.subtitle !== '' && <p className="meta">{item.subtitle}</p>}
                 <p className="meta">Suggested based on {item.suggestedBy}</p>
                 {item.overview !== '' && <p className="meta search-overview">{item.overview}</p>}
               </div>

@@ -1,3 +1,0 @@
-episode_number,user_id,created_at,s_id,episode_id,series_name,season_number,gsi,key,ep_id,ep_no,s_no,runtime,series_follow_count,movie_watch_count,total_movies_runtime,total_series_runtime,ep_watch_count,updated_at,is_archived,is_followed,is_for_later,uuid,most_recent_ep_watched,followed_at,rewatch_count,is_unitary,bulk_type,is_special
-1,15442696,2008-01-20 02:42:31,275611,4755188,Breaking Bad,1,watch-episode-1,key-1,4755188,,,,,,,,,,,,,,,,,,,
-2,15442696,2008-01-27 02:42:31,275611,4755189,Breaking Bad,1,watch-episode-2,key-2,4755189,,,,,,,,,,,,,,,,,,,

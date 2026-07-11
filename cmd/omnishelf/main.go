@@ -17,6 +17,7 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/api"
 	"github.com/davidlc1229/omnishelf/internal/artwork"
 	"github.com/davidlc1229/omnishelf/internal/books"
+	"github.com/davidlc1229/omnishelf/internal/cards"
 	"github.com/davidlc1229/omnishelf/internal/config"
 	"github.com/davidlc1229/omnishelf/internal/db"
 	"github.com/davidlc1229/omnishelf/internal/discogs"
@@ -28,10 +29,13 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/music"
 	"github.com/davidlc1229/omnishelf/internal/musicbrainz"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
+	"github.com/davidlc1229/omnishelf/internal/pokemontcg"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 	syncengine "github.com/davidlc1229/omnishelf/internal/sync"
 	"github.com/davidlc1229/omnishelf/internal/tmdb"
 	"github.com/davidlc1229/omnishelf/internal/tv"
+	"github.com/davidlc1229/omnishelf/internal/vision"
+	"github.com/davidlc1229/omnishelf/internal/ygoprodeck"
 )
 
 func main() {
@@ -90,6 +94,9 @@ func runServer() error {
 	igdbClient := igdb.New(cfg.IGDBClientID, cfg.IGDBClientSecret)
 	discogsClient := discogs.New(cfg.DiscogsToken)
 	musicbrainzClient := musicbrainz.New(cfg.ContactEmail)
+	visionClient := vision.New(cfg.GoogleVisionCredentials)
+	ygoprodeckClient := ygoprodeck.New()
+	pokemontcgClient := pokemontcg.New(cfg.PokemonTCGAPIKey)
 	imageStore := images.New(cfg.ImagesDir)
 
 	// Unauthenticated liveness probe (Docker HEALTHCHECK / TrueNAS): reachable
@@ -117,6 +124,9 @@ func runServer() error {
 	musicSvc := music.NewService(gdb, discogsClient, musicbrainzClient, imageStore)
 	api.RegisterMusicRoutes(protected, musicSvc)
 
+	cardsSvc := cards.NewService(gdb, visionClient, ygoprodeckClient, pokemontcgClient, imageStore)
+	api.RegisterCardRoutes(protected, cardsSvc)
+
 	// Cover proxy for ephemeral search results (streams source-CDN thumbnails
 	// same-origin so the strict img-src CSP allows them).
 	api.RegisterCoverRoutes(protected, igdbClient, olClient, musicbrainzClient)
@@ -139,8 +149,15 @@ func runServer() error {
 	}
 	scheduler.Start()
 
-	// Cached artwork straight off the images volume.
-	router.StaticFS("/images", gin.Dir(cfg.ImagesDir, false))
+	// Cached artwork served from the images volume, gated behind JWT auth.
+	// Previously registered on the bare router (unauthenticated), which
+	// allowed any network peer to fetch cover art by filename without a valid
+	// session. Moved here so it shares the same AuthRequired middleware as
+	// every other resource. Same-origin <img src="/images/..."> requests
+	// automatically carry the session cookie, so no frontend changes are
+	// needed.
+	imagesGroup := router.Group("/", api.AuthRequired([]byte(cfg.JWTSecret)))
+	imagesGroup.StaticFS("/images", gin.Dir(cfg.ImagesDir, false))
 
 	// API routes are registered by later tasks; an unknown /api path must be a
 	// JSON 404 in the standard envelope, never the SPA fallback HTML.

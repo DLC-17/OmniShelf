@@ -2,6 +2,8 @@ import { useRef, useState } from 'react'
 import { ApiError } from '../../api/client'
 import {
   BOOK_STATUSES,
+  CARD_OWNERSHIP,
+  CARD_STATUSES,
   GAME_OWNERSHIP,
   GAME_STATUSES,
   MOVIE_STATUSES,
@@ -10,6 +12,7 @@ import {
   TV_STATUSES,
 } from '../../api/library'
 import type { ItemStatus, LibraryItem } from '../../api/library'
+import { formatUsd } from '../../lib/currency'
 import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
 import { useDeleteItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
 import OwnershipSelect from '../common/OwnershipSelect'
@@ -52,6 +55,7 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const isTV = item.type === 'TV'
   const isMovie = item.type === 'MOVIE'
   const isMusic = item.type === 'MUSIC'
+  const isCard = item.type === 'CARD'
   const statuses = isBook
     ? BOOK_STATUSES
     : isGame
@@ -60,7 +64,9 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
         ? MOVIE_STATUSES
         : isMusic
           ? MUSIC_STATUSES
-          : TV_STATUSES
+          : isCard
+            ? CARD_STATUSES
+            : TV_STATUSES
 
   const runUpdate = (patch: {
     status?: ItemStatus
@@ -192,6 +198,25 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
             {isGame && item.platform !== '' && <p className="muted" style={{ margin: 0 }}>{item.platform}</p>}
             {isMusic && item.artist !== '' && <p className="muted" style={{ margin: 0 }}>{item.artist}</p>}
             {isMusic && item.year > 0 && <p className="meta">{item.year}</p>}
+            {isCard && item.platform !== '' && (
+              <p className="muted" style={{ margin: 0 }}>
+                {item.platform}
+                {item.setCode !== '' && ` · ${item.setCode}`}
+              </p>
+            )}
+            {isCard && item.artist !== '' && <p className="meta">Illus. {item.artist}</p>}
+            {isCard && item.price > 0 && <p className="meta">Market price {formatUsd(item.price)}</p>}
+            {isCard && (
+              <div className="field" style={{ marginTop: '0.5rem' }}>
+                <OwnershipSelect
+                  options={CARD_OWNERSHIP}
+                  selected={ownership}
+                  disabled={updateOwnership.isPending}
+                  label={`Finish for ${item.title}`}
+                  onChange={handleOwnership}
+                />
+              </div>
+            )}
 
             <div className="detail-rating">
               <span className="muted">Your rating</span>

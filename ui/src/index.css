@@ -373,6 +373,13 @@ button:disabled {
   margin-top: 0.25rem;
   white-space: normal;
   overflow-wrap: anywhere;
+  /* Keep summaries brief and uniform on every viewport: clamp to three lines
+     with an ellipsis instead of letting long synopses stretch the card. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .badge {

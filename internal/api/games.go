@@ -213,6 +213,7 @@ func (h *gamesHandler) discover(c *gin.Context) {
 			"title":       it.Title,
 			"year":        it.Year,
 			"coverPath":   it.CoverPath,
+			"summary":     it.Summary,
 			"suggestedBy": it.SuggestedBy,
 		})
 	}

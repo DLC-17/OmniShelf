@@ -46,8 +46,10 @@ type itemResponse struct {
 	PageCount   int       `json:"pageCount"`
 	Description string    `json:"description"`
 	Platform    string    `json:"platform"`
-	Artist      string    `json:"artist"`    // music only
+	Artist      string    `json:"artist"`    // music: artist; cards: illustrator
 	Year        int       `json:"year"`      // music only
+	Price       float64   `json:"price"`     // cards only: market price at scan time
+	SetCode     string    `json:"setCode"`   // cards only: display collector code, e.g. "10/182"
 	Tags        []string  `json:"tags"`      // source-derived tags/keywords; [] when none
 	Ownership   []string  `json:"ownership"` // user-selected ownership formats (games/music); [] when none
 	UpdatedAt   time.Time `json:"updatedAt"`
@@ -78,6 +80,8 @@ func toLibraryResponse(e *books.LibraryEntry) itemResponse {
 	r.Platform = e.Platform
 	r.Artist = e.Artist
 	r.Year = e.Year
+	r.Price = e.Price
+	r.SetCode = e.SetCode
 	if e.Tags != nil {
 		r.Tags = e.Tags
 	}
@@ -102,7 +106,7 @@ func (h *libraryHandler) list(c *gin.Context) {
 		c.Query("type"), c.Query("status"))
 	switch {
 	case errors.Is(err, books.ErrInvalidFilter):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, or MUSIC; status must be WATCHING, READING, PLAYING, LISTENING, PLAN_TO, COMPLETED, or STOPPED")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, MUSIC, or CARD; status must be WATCHING, READING, PLAYING, LISTENING, OWNED, PLAN_TO, COMPLETED, or STOPPED")
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "listing library failed")
 	default:
@@ -167,7 +171,7 @@ func (h *libraryHandler) setOwnership(c *gin.Context) {
 	formats, err := h.svc.SetOwnership(c.Request.Context(), CurrentUserID(c), itemID, req.Formats)
 	switch {
 	case errors.Is(err, ownership.ErrInvalidFormat):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "formats must be a subset of the allowed set for this item's type (games: Physical, GOG)")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "formats must be a subset of the allowed set for this item's type (games: Physical, GOG; music: Vinyl, CD; cards: Holo, Reverse Holo)")
 	case errors.Is(err, books.ErrItemNotFound):
 		Error(c, http.StatusNotFound, CodeNotFound, "tracking item not found")
 	case err != nil:

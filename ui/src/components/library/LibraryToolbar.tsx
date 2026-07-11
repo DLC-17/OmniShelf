@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   BOOK_STATUSES,
+  CARD_STATUSES,
   GAME_STATUSES,
   MOVIE_STATUSES,
   MUSIC_STATUSES,
@@ -29,6 +30,7 @@ const STATUS_LABELS: Record<ItemStatus, string> = {
   READING: 'Reading',
   PLAYING: 'Playing',
   LISTENING: 'Listening',
+  OWNED: 'Owned',
   PLAN_TO: 'Not started',
   COMPLETED: 'Completed',
   STOPPED: 'Stopped',
@@ -40,6 +42,7 @@ const MEDIA_NOUN: Record<MediaType, string> = {
   GAME: 'games',
   MOVIE: 'movies',
   MUSIC: 'albums',
+  CARD: 'cards',
 }
 
 const splitCsv = (s: string): string[] =>
@@ -84,6 +87,7 @@ const ASPECTS: Record<MediaType, AspectDef[]> = {
   BOOK: [STATUS_ASPECT, AUTHOR_ASPECT, TAG_ASPECT],
   GAME: [STATUS_ASPECT, PLATFORM_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
   MUSIC: [STATUS_ASPECT, ARTIST_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
+  CARD: [STATUS_ASPECT, TAG_ASPECT],
 }
 
 function statusesFor(media: MediaType): ItemStatus[] {
@@ -96,6 +100,8 @@ function statusesFor(media: MediaType): ItemStatus[] {
       return MOVIE_STATUSES
     case 'MUSIC':
       return MUSIC_STATUSES
+    case 'CARD':
+      return CARD_STATUSES
     default:
       return TV_STATUSES
   }
