@@ -51,23 +51,11 @@ TMDB_API_KEY=... OMNISHELF_CONTACT_EMAIL=you@example.com \
 ```
 
 The app listens on `:8080` (`http://localhost:8080`). For repeat runs, copy
-`.env.example` to `.env` and fill it in (never commit `.env` — it is
-gitignored). Note the JWT secret must survive restarts or every session is
+`.env.example` to `.env` and fill it in. Note the JWT secret must survive restarts or every session is
 invalidated, so persist the generated value rather than regenerating per run.
 
 ---
 
-## Deployment (TrueNAS SCALE)
-
-OmniShelf runs as a single Docker container. Build the image (multi-stage
-`Dockerfile` builds the SPA and a CGO-free binary):
-
-```sh
-docker build -t omnishelf:latest .
-```
-
-Push it to a registry the NAS can reach, or load it onto the host directly
-(`docker save omnishelf:latest | ssh <nas> docker load`).
 
 ### 1. Host datasets & permissions
 
