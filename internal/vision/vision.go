@@ -95,7 +95,10 @@ func (c *Client) get(ctx context.Context) (*visionapi.ImageAnnotatorClient, erro
 	if c.client != nil {
 		return c.client, nil
 	}
-	client, err := visionapi.NewImageAnnotatorClient(ctx, option.WithCredentialsFile(c.credentialsFile))
+	client, err := visionapi.NewImageAnnotatorClient(
+		ctx,
+		option.WithAuthCredentialsFile(option.ServiceAccount, c.credentialsFile),
+	)
 	if err != nil {
 		return nil, err
 	}

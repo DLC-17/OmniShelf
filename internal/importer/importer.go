@@ -113,13 +113,13 @@ type pendingWatch struct {
 // New returns an Importer, applying config defaults.
 func New(cfg Config) *Importer {
 	imp := &Importer{
-		db:           cfg.DB,
-		tmdb:         cfg.TMDB,
-		images:       cfg.Images,
-		httpClient:   cfg.HTTPClient,
-		imageBaseURL: cfg.ImageBaseURL,
-		lockRetry:    cfg.LockRetry,
-		lockWait:     cfg.LockWait,
+		db:              cfg.DB,
+		tmdb:            cfg.TMDB,
+		images:          cfg.Images,
+		httpClient:      cfg.HTTPClient,
+		imageBaseURL:    cfg.ImageBaseURL,
+		lockRetry:       cfg.LockRetry,
+		lockWait:        cfg.LockWait,
 		skipped:         make(map[uint]int),
 		notesCreated:    make(map[uint]int),
 		current:         make(map[uint]string),
@@ -257,16 +257,23 @@ func (imp *Importer) Resolve(jobID, userID uint, mappings map[string]int) (*mode
 		if imp.isMovieUnresolved(jobID, norm) {
 			detail, err := imp.tmdb.GetMovie(ctx, tmdbID)
 			if err != nil {
-				imp.saveUnresolved(job, unresolved)
-				return nil, fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
+				resolveErr := fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
+				if saveErr := imp.saveUnresolved(job, unresolved); saveErr != nil {
+					return nil, errors.Join(resolveErr, saveErr)
+				}
+				return nil, resolveErr
 			}
 			movie, err := imp.upsertMovie(ctx, detail.ID, detail.Title, detail.Overview, detail.ReleaseDate, detail.PosterPath)
 			if err != nil {
-				imp.saveUnresolved(job, unresolved)
+				if saveErr := imp.saveUnresolved(job, unresolved); saveErr != nil {
+					return nil, errors.Join(err, saveErr)
+				}
 				return nil, err
 			}
 			if err := imp.ensureMovieTracking(userID, movie); err != nil {
-				imp.saveUnresolved(job, unresolved)
+				if saveErr := imp.saveUnresolved(job, unresolved); saveErr != nil {
+					return nil, errors.Join(err, saveErr)
+				}
 				return nil, err
 			}
 			unresolved = removeTitle(unresolved, norm)
@@ -276,15 +283,20 @@ func (imp *Importer) Resolve(jobID, userID uint, mappings map[string]int) (*mode
 
 		show, epIDs, err := imp.importShow(ctx, tmdbID)
 		if err != nil {
+			resolveErr := fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
 			// Persist what already succeeded before surfacing the failure.
-			imp.saveUnresolved(job, unresolved)
-			return nil, fmt.Errorf("%w: %q → %d: %v", ErrTMDB, title, tmdbID, err)
+			if saveErr := imp.saveUnresolved(job, unresolved); saveErr != nil {
+				return nil, errors.Join(resolveErr, saveErr)
+			}
+			return nil, resolveErr
 		}
 		// Remember the hand-mapped title so a future import resolves it
 		// automatically.
 		imp.saveAlias(norm, tmdbID)
 		if err := imp.ensureTracking(userID, show); err != nil {
-			imp.saveUnresolved(job, unresolved)
+			if saveErr := imp.saveUnresolved(job, unresolved); saveErr != nil {
+				return nil, errors.Join(err, saveErr)
+			}
 			return nil, err
 		}
 

@@ -145,7 +145,9 @@ func readUploadFiles(c *gin.Context) ([]importer.UploadFile, bool) {
 				return nil, false
 			}
 			data, err := io.ReadAll(io.LimitReader(src, maxUploadBytes+1))
-			src.Close()
+			if closeErr := src.Close(); err == nil && closeErr != nil {
+				err = closeErr
+			}
 			if err != nil {
 				Error(c, http.StatusBadRequest, CodeInvalidImportFile, fmt.Sprintf("cannot read uploaded file %s", fh.Filename))
 				return nil, false

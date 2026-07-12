@@ -50,6 +50,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+          args: ./cmd/... ./internal/...
 
       # Step 3 — Go tests with the race detector. ui/dist exists from step 1,
       # so the //go:embed of the SPA compiles.
