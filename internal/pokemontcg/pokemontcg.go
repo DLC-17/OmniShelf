@@ -153,7 +153,7 @@ func (c *Client) FindCard(ctx context.Context, name, number, printedTotal string
 			return nil, errors.Join(ErrUpstream, err)
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<22))
 	if resp.StatusCode == http.StatusNotFound {

@@ -154,7 +154,7 @@ func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
 	if err != nil {
 		return nil, fmt.Errorf("igdb: request games: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode != http.StatusOK {
@@ -233,7 +233,7 @@ func (c *Client) SearchGames(ctx context.Context, name string) ([]SearchResult, 
 	if err != nil {
 		return nil, fmt.Errorf("igdb: request search: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<18))
 	if resp.StatusCode != http.StatusOK {
@@ -322,7 +322,7 @@ func (c *Client) SimilarGames(ctx context.Context, seedIDs []int) (map[int][]Sim
 	if err != nil {
 		return nil, fmt.Errorf("igdb: request similar: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
@@ -420,7 +420,7 @@ func (c *Client) getToken(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("igdb: token request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode != http.StatusOK {

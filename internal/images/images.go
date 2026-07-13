@@ -60,7 +60,7 @@ func (s *Store) Fetch(ctx context.Context, httpClient *http.Client, url, kind, e
 	if err != nil {
 		return "", fmt.Errorf("images: download %s: %w", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("images: download %s: unexpected status %d", url, resp.StatusCode)
@@ -102,12 +102,12 @@ func (s *Store) writeAtomic(dir, relPath, externalID string, r io.Reader) (strin
 	tmpName := tmp.Name()
 
 	if _, err := io.Copy(tmp, r); err != nil {
-		tmp.Close()
-		os.Remove(tmpName)
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("images: write %s: %w", relPath, err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("images: close temp file: %w", err)
 	}
 
@@ -115,11 +115,11 @@ func (s *Store) writeAtomic(dir, relPath, externalID string, r io.Reader) (strin
 	// Windows os.Rename fails if the destination exists; remove any stale
 	// cached copy first so re-writes (nightly retry, refresh, upload) succeed.
 	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("images: replace %s: %w", relPath, err)
 	}
 	if err := os.Rename(tmpName, dest); err != nil {
-		os.Remove(tmpName)
+		_ = os.Remove(tmpName)
 		return "", fmt.Errorf("images: rename into place: %w", err)
 	}
 	return relPath, nil

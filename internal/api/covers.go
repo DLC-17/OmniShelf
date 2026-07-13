@@ -96,7 +96,7 @@ func (h *coversHandler) proxy(c *gin.Context) {
 		c.Status(http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		c.Status(http.StatusNotFound)
 		return

@@ -136,7 +136,7 @@ func (c *Client) LookupByBarcode(ctx context.Context, barcode string) (*Release,
 	if err != nil {
 		return nil, fmt.Errorf("discogs: request search: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode != http.StatusOK {
