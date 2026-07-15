@@ -48,8 +48,7 @@ func (f *fakeIGDB) CoverURL(imageID, _ string) string {
 }
 
 type fakeImages struct {
-	savePath string
-	err      error
+	err error
 }
 
 func (f *fakeImages) Fetch(_ context.Context, _ *http.Client, url, kind, externalID string) (string, error) {
