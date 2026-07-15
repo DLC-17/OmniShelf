@@ -153,6 +153,22 @@ func (s *Service) Scan(ctx context.Context, barcode string) (*models.Game, error
 		Platform: meta.Platform,
 		IGDBID:   meta.IGDBID,
 	}
+	if game.IGDBID == 0 && game.Title != "" && s.enrich != nil {
+		results, serr := s.enrich.SearchGames(ctx, game.Title)
+		if serr == nil && len(results) > 0 {
+			var bestMatch *igdb.SearchResult
+			for _, r := range results {
+				if strings.EqualFold(r.Name, game.Title) {
+					bestMatch = &r
+					break
+				}
+			}
+			if bestMatch == nil {
+				bestMatch = &results[0]
+			}
+			game.IGDBID = bestMatch.ID
+		}
+	}
 	gameTags := s.enrichFromIGDB(ctx, &game)
 	if err := s.upsertGame(ctx, &game); err != nil {
 		return nil, err

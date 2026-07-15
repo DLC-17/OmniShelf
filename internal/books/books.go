@@ -12,6 +12,7 @@ package books
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -175,6 +176,9 @@ func (s *Service) Scan(ctx context.Context, isbn string) (*models.Book, error) {
 		CoverPath:   coverPath,
 		PageCount:   meta.PageCount,
 		Description: meta.Description,
+	}
+	if book.CoverPath == "" || book.Description == "" || book.PageCount == 0 {
+		s.enrichFromGoogleBooks(ctx, isbn13, &book)
 	}
 	if err := s.upsertBook(ctx, &book); err != nil {
 		return nil, err
@@ -365,6 +369,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var movieTMDBIDs []int
 	var isbns []string
 	var gameIGDBIDs []int
+	var gameBarcodes []string
 	var albumExtIDs []string
 	var cardExtIDs []string
 	for _, it := range items {
@@ -383,8 +388,10 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			// GAME items are keyed by IGDB id (games.gameExternalID). Legacy
 			// items keyed by a barcode parse to a number that matches no IGDB
 			// id and simply fall through to the placeholder (backfill gap).
-			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil {
+			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil && len(it.ExternalID) < 9 {
 				gameIGDBIDs = append(gameIGDBIDs, id)
+			} else {
+				gameBarcodes = append(gameBarcodes, it.ExternalID)
 			}
 		case TypeMusic:
 			albumExtIDs = append(albumExtIDs, it.ExternalID)
@@ -414,13 +421,27 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		}
 	}
 	gamesByIGDB := map[string]models.Game{}
-	if len(gameIGDBIDs) > 0 {
+	gamesByBarcode := map[string]models.Game{}
+	if len(gameIGDBIDs) > 0 || len(gameBarcodes) > 0 {
 		var rows []models.Game
-		if err := s.db.WithContext(ctx).Where("igdb_id IN ?", gameIGDBIDs).Find(&rows).Error; err != nil {
+		q := s.db.WithContext(ctx)
+		if len(gameIGDBIDs) > 0 && len(gameBarcodes) > 0 {
+			q = q.Where("igdb_id IN ? OR barcode IN ?", gameIGDBIDs, gameBarcodes)
+		} else if len(gameIGDBIDs) > 0 {
+			q = q.Where("igdb_id IN ?", gameIGDBIDs)
+		} else {
+			q = q.Where("barcode IN ?", gameBarcodes)
+		}
+		if err := q.Find(&rows).Error; err != nil {
 			return nil, fmt.Errorf("loading game metadata: %w", err)
 		}
 		for _, g := range rows {
-			gamesByIGDB[strconv.Itoa(g.IGDBID)] = g
+			if g.IGDBID != 0 {
+				gamesByIGDB[strconv.Itoa(g.IGDBID)] = g
+			}
+			if g.Barcode != "" {
+				gamesByBarcode[g.Barcode] = g
+			}
 		}
 	}
 	moviesByTMDB := map[string]models.Movie{}
@@ -478,7 +499,12 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 				mediaKey[i] = b.ID
 			}
 		case TypeGame:
-			if g, ok := gamesByIGDB[it.ExternalID]; ok {
+			var g models.Game
+			var ok bool
+			if g, ok = gamesByIGDB[it.ExternalID]; !ok {
+				g, ok = gamesByBarcode[it.ExternalID]
+			}
+			if ok {
 				entry.ArtworkPath = g.CoverPath
 				entry.Platform = g.Platform
 				entry.Description = g.Description
@@ -1080,4 +1106,71 @@ func normalizeISBN13(isbn string) (string, error) {
 // surfaces them as plain error strings (no GORM error translation).
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
+}
+
+type googleBooksResponse struct {
+	Items []struct {
+		VolumeInfo struct {
+			Title       string   `json:"title"`
+			Authors     []string `json:"authors"`
+			Description string   `json:"description"`
+			PageCount   int      `json:"pageCount"`
+			ImageLinks  struct {
+				Thumbnail string `json:"thumbnail"`
+			} `json:"imageLinks"`
+		} `json:"volumeInfo"`
+	} `json:"items"`
+}
+
+func (s *Service) enrichFromGoogleBooks(ctx context.Context, isbn string, book *models.Book) {
+	url := fmt.Sprintf("https://www.googleapis.com/books/v1/volumes?q=isbn:%s", isbn)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("User-Agent", "OmniShelf/1.0")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+
+	var data googleBooksResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return
+	}
+
+	if len(data.Items) == 0 {
+		return
+	}
+
+	info := data.Items[0].VolumeInfo
+	if book.Title == "" {
+		book.Title = info.Title
+	}
+	if book.Authors == "" && len(info.Authors) > 0 {
+		book.Authors = strings.Join(info.Authors, ", ")
+	}
+	if book.Description == "" {
+		book.Description = info.Description
+	}
+	if book.PageCount == 0 {
+		book.PageCount = info.PageCount
+	}
+
+	if book.CoverPath == "" && info.ImageLinks.Thumbnail != "" {
+		thumb := info.ImageLinks.Thumbnail
+		if strings.HasPrefix(thumb, "http://") {
+			thumb = "https://" + thumb[7:]
+		}
+		path, err := s.images.Fetch(ctx, s.httpClient, thumb, "book", isbn)
+		if err == nil {
+			book.CoverPath = path
+		}
+	}
 }
