@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { ApiError } from '../api/client'
 import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
-import LibraryToolbar, { applyLibrarySearch } from '../components/library/LibraryToolbar'
-import type { FilterState } from '../components/library/LibraryToolbar'
+import LibraryToolbar from '../components/library/LibraryToolbar'
+import { applyLibrarySearch } from '../lib/librarySearch'
+import type { FilterState } from '../lib/librarySearch'
 import MovieSearch from '../components/movies/MovieSearch'
 import MusicSearch from '../components/music/MusicSearch'
 import Poster from '../components/tv/Poster'
@@ -129,8 +130,8 @@ export default function Library() {
 
   const items: LibraryItem[] = library.data ?? []
   const visible = useMemo(
-    () => applyLibrarySearch(items, search, filters, media),
-    [items, search, filters, media],
+    () => applyLibrarySearch(library.data ?? [], search, filters, media),
+    [library.data, search, filters, media],
   )
   const selected = items.find((i) => i.id === selectedId) ?? null
 

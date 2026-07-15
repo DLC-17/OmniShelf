@@ -3,7 +3,7 @@
  * Used to avoid triggering automatic camera/webcam permission prompts on desktop.
  */
 export function isMobileDevice(): boolean {
-  const userAgent = navigator.userAgent || navigator.vendor || (window as any).opera;
+  const userAgent = navigator.userAgent || navigator.vendor;
   if (/android|ipad|iphone|ipod|windows phone/i.test(userAgent)) {
     return true;
   }
