@@ -33,6 +33,10 @@ USER 568:568
 EXPOSE 8080 443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/api/health || wget -qO- --no-check-certificate https://127.0.0.1:443/api/health || exit 1
+  CMD if [ -n "$TLS_CERT_FILE" ]; then \
+        wget -qO- --no-check-certificate https://127.0.0.1:${OMNISHELF_PORT:-443}/api/health || exit 1; \
+      else \
+        wget -qO- http://127.0.0.1:${OMNISHELF_PORT:-8080}/api/health || exit 1; \
+      fi
 
 ENTRYPOINT ["omnishelf"]

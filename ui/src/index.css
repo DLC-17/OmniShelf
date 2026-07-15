@@ -1002,6 +1002,10 @@ button:disabled {
 }
 
 /* Ensure the dynamically mounted video/canvas from html5-qrcode covers the container */
+#omnishelf-scanner {
+  width: 100% !important;
+  height: 100% !important;
+}
 .scanner-view-container video {
   width: 100% !important;
   height: 100% !important;
