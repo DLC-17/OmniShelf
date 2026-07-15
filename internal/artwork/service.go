@@ -18,8 +18,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -66,6 +68,7 @@ type TMDB interface {
 // game refresh reports ErrNoArtwork instead of panicking.
 type IGDB interface {
 	GetGame(ctx context.Context, igdbID int) (*igdb.Game, error)
+	SearchGames(ctx context.Context, name string) ([]igdb.SearchResult, error)
 	CoverURL(imageID, size string) string
 }
 
@@ -214,17 +217,45 @@ func (s *Service) refreshMovie(ctx context.Context, externalID string) (string, 
 	return rel, nil
 }
 
-func (s *Service) refreshGame(ctx context.Context, barcode string) (string, error) {
+func (s *Service) refreshGame(ctx context.Context, externalID string) (string, error) {
 	if s.igdb == nil {
 		return "", ErrNoArtwork
 	}
 	var game models.Game
-	if err := s.db.WithContext(ctx).Where(&models.Game{Barcode: barcode}).First(&game).Error; err != nil {
+	var err error
+	err = s.db.WithContext(ctx).Where("barcode = ?", externalID).First(&game).Error
+	if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+		if id, parseErr := strconv.Atoi(externalID); parseErr == nil {
+			err = s.db.WithContext(ctx).Where("igdb_id = ?", id).First(&game).Error
+		}
+	}
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", ErrNoArtwork
 		}
-		return "", fmt.Errorf("artwork: load game %s: %w", barcode, err)
+		return "", fmt.Errorf("artwork: load game %s: %w", externalID, err)
 	}
+
+	if game.IGDBID == 0 && game.Title != "" {
+		results, serr := s.igdb.SearchGames(ctx, game.Title)
+		if serr == nil && len(results) > 0 {
+			var bestMatch *igdb.SearchResult
+			for _, r := range results {
+				if strings.EqualFold(r.Name, game.Title) {
+					bestMatch = &r
+					break
+				}
+			}
+			if bestMatch == nil {
+				bestMatch = &results[0]
+			}
+			game.IGDBID = bestMatch.ID
+			if uerr := s.db.WithContext(ctx).Model(&game).Update("igdb_id", game.IGDBID).Error; uerr != nil {
+				log.Printf("artwork: failed to save resolved IGDB ID for game %s: %v", externalID, uerr)
+			}
+		}
+	}
+
 	if game.IGDBID == 0 {
 		return "", ErrNoArtwork
 	}
@@ -236,11 +267,15 @@ func (s *Service) refreshGame(ctx context.Context, barcode string) (string, erro
 		return "", ErrNoArtwork
 	}
 	url := s.igdb.CoverURL(detail.CoverImageID, "")
-	rel, err := s.images.Fetch(ctx, s.httpClient, url, "game", barcode)
+	key := game.Barcode
+	if key == "" {
+		key = "igdb-" + strconv.Itoa(game.IGDBID)
+	}
+	rel, err := s.images.Fetch(ctx, s.httpClient, url, "game", key)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrUpstream, err)
 	}
-	if err := s.setCover(ctx, typeGame, barcode, rel); err != nil {
+	if err := s.setCover(ctx, typeGame, externalID, rel); err != nil {
 		return "", err
 	}
 	return rel, nil
@@ -284,6 +319,11 @@ func (s *Service) setCover(ctx context.Context, typ, externalID, rel string) err
 		res = db.Model(&models.Movie{}).Where("tmdb_id = ?", tmdbID).Update("poster_path", rel)
 	case typeGame:
 		res = db.Model(&models.Game{}).Where("barcode = ?", externalID).Update("cover_path", rel)
+		if res.Error == nil && res.RowsAffected == 0 {
+			if id, parseErr := strconv.Atoi(externalID); parseErr == nil {
+				res = db.Model(&models.Game{}).Where("igdb_id = ?", id).Update("cover_path", rel)
+			}
+		}
 	case typeBook:
 		res = db.Model(&models.Book{}).Where("isbn13 = ?", externalID).Update("cover_path", rel)
 	default:
