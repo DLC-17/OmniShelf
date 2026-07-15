@@ -25,13 +25,13 @@ OmniShelf acts as a unified shelf for multiple media categories, utilizing speci
 *   **Movies:** Plain watchlist tracking (`PLAN_TO` / `COMPLETED`) without episodes or seasons.
 
 ### 📚 Books
-*   **Source:** [OpenLibrary](https://openlibrary.org/) (requires `OMNISHELF_CONTACT_EMAIL` for User-Agent compliance).
-*   **Identification:** Scan book EAN-13 ISBN barcodes using the browser camera or a handheld scanner. Falls back to text ISBN lookup or search.
+*   **Source:** [OpenLibrary](https://openlibrary.org/) (requires `OMNISHELF_CONTACT_EMAIL` for User-Agent compliance) and the public [Google Books API](https://developers.google.com/books) (no API key required).
+*   **Identification:** Scan book EAN-13 ISBN barcodes using the browser camera or a handheld scanner. Automatically falls back to the Google Books API to pull cover art, descriptions, and page counts if OpenLibrary returns incomplete results. Also supports text ISBN lookup or search.
 *   **Tracking:** Supports page number progress tracking and timestamped text journal notes.
 
 ### 🎮 Video Games
 *   **Source:** [ScanDex](https://scandex.net/) (optional barcode lookup) and [IGDB](https://www.igdb.com/) (optional cover, summaries, genres/keywords via Twitch OAuth).
-*   **Identification:** Scan game UPC/EAN barcodes to resolve title/platform via ScanDex, then enrich metadata and covers via IGDB. Falls back to IGDB text search.
+*   **Identification:** Scan game UPC/EAN barcodes to resolve title/platform via ScanDex. If the barcode has no pre-mapped IGDB ID, the system automatically performs an IGDB title search to resolve the game, then fetches the cover art, summary, and genre/keyword tags. Falls back to text search.
 *   **Tracking:** Supports status updates (`PLAYING`, `PLAN_TO`, `COMPLETED`, `STOPPED`) and ownership tracking (`Physical`, `GOG`).
 
 ### 🎵 Music Albums
@@ -56,7 +56,7 @@ OmniShelf is designed for a **trusted household on a private network** (LAN and/
 *   **Secret Hygiene:** The application refuses to start if `OMNISHELF_JWT_SECRET` is unset, shorter than 32 characters, or matches the `.env.example` placeholder. Third-party API keys remain server-side.
 *   **Container Privilege:** Runs as unprivileged UID/GID 568 (the TrueNAS SCALE `apps` user), not root.
 *   **HTTP Hardening:** Security headers include a same-origin Content-Security-Policy (CSP), `X-Content-Type-Options: nosniff`, and clickjacking protections.
-*   **TLS:** Serves plain HTTP and does not terminate TLS; Tailscale or a reverse proxy handles HTTPS. LAN session cookies are deliberately **not** marked `Secure` to allow HTTP LAN access.
+*   **TLS & HTTPS:** Supports native TLS termination. Provide the paths to your PEM-encoded certificate and private key using `TLS_CERT_FILE` and `TLS_KEY_FILE` (e.g. generated via Tailscale). When active, the server defaults to port `443` and listens securely. If unset, it falls back to plain HTTP (usually handled by a reverse proxy or Tailscale Serve). LAN session cookies are deliberately **not** marked `Secure` to allow HTTP LAN access.
 
 ---
 
@@ -129,6 +129,8 @@ openssl rand -hex 32
 | `IGDB_CLIENT_ID` | *(optional)* | IGDB client ID (Twitch Developer portal) |
 | `IGDB_CLIENT_SECRET` | *(optional)* | IGDB client secret (Twitch Developer portal) |
 | `OMNISHELF_DISCOGS_TOKEN` | *(optional)* | Discogs token for music barcode lookups |
+| `TLS_CERT_FILE` | *(optional)* | Path to a PEM-encoded TLS certificate file inside the container |
+| `TLS_KEY_FILE` | *(optional)* | Path to a PEM-encoded TLS private key file inside the container |
 | `GOOGLE_APPLICATION_CREDENTIALS` | *(optional)* | Path to Google Cloud Vision JSON credentials |
 | `POKEMONTCG_API_KEY` | *(optional)* | Pokémon TCG API key (increases rate limit) |
 
@@ -146,7 +148,11 @@ Discover Apps → **Install via YAML / Custom App**:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
+  CMD if [ -n "$TLS_CERT_FILE" ]; then \
+        wget -qO- --no-check-certificate https://127.0.0.1:${OMNISHELF_PORT:-443}/api/health || exit 1; \
+      else \
+        wget -qO- http://127.0.0.1:${OMNISHELF_PORT:-8080}/api/health || exit 1; \
+      fi
 ```
 
 ### First-run: Bootstrap an Invite Code
@@ -166,10 +172,12 @@ Modern browsers only expose the camera API (`getUserMedia`) in a **Secure Contex
 
 To scan cards or barcodes on a phone, access OmniShelf over **Tailscale** (which handles HTTPS automatically):
 
-```
-https://omnishelf.<your-tailnet>.ts.net
-```
-
-1. Install Tailscale on your NAS and enable HTTPS certificates / MagicDNS in the Tailscale console.
-2. Expose port 8080 via `tailscale serve` so the Tailnet hostname proxies to the container. (Do NOT use `funnel`, which exposes it to the open internet).
+1. **Option A (Native HTTPS - Recommended)**:
+   Generate Tailscale certificates on your host:
+   ```sh
+   tailscale cert truenas-scale.<your-tailnet>.ts.net
+   ```
+   Mount the cert/key files into the container (e.g. inside a `/credentials` volume) and set `TLS_CERT_FILE` and `TLS_KEY_FILE` to point to them.
+2. **Option B (Tailscale Serve)**:
+   Expose port 8080 via `tailscale serve` so the Tailnet hostname proxies to the container. (Do NOT use `funnel`, which exposes it to the open internet).
 3. Open the `https://...ts.net` URL on your phone to unlock camera permissions.
