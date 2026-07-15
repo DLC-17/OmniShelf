@@ -51,11 +51,12 @@ type ArtworkStore interface {
 
 // Engine runs the nightly TMDB sync.
 type Engine struct {
-	db           *gorm.DB
-	tmdb         MetadataClient
-	images       ArtworkStore
-	httpClient   *http.Client
-	imageBaseURL string
+	db                *gorm.DB
+	tmdb              MetadataClient
+	images            ArtworkStore
+	httpClient        *http.Client
+	imageBaseURL      string
+	reconcileWatching func(ctx context.Context) error
 }
 
 // Option customizes an Engine.
@@ -70,6 +71,12 @@ func WithHTTPClient(h *http.Client) Option {
 // point artwork downloads at an httptest.Server).
 func WithImageBaseURL(u string) Option {
 	return func(e *Engine) { e.imageBaseURL = u }
+}
+
+// WithReconcileWatching registers a callback that the sync engine calls after
+// each run to flip WATCHING shows to COMPLETED where all episodes are watched.
+func WithReconcileWatching(fn func(ctx context.Context) error) Option {
+	return func(e *Engine) { e.reconcileWatching = fn }
 }
 
 // New returns a sync Engine. db must be the application's shared *gorm.DB;
@@ -144,6 +151,15 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 			continue
 		}
 		synced++
+	}
+
+	// Flip any WATCHING show where every non-S0 episode is now watched to
+	// COMPLETED. This catches cases where the user's last watch was made before
+	// the episode data was fully synced.
+	if e.reconcileWatching != nil {
+		if recErr := e.reconcileWatching(ctx); recErr != nil {
+			log.Printf("sync: reconcile watching→completed: %v", recErr)
+		}
 	}
 
 	if logErr := e.writeSyncLog(ctx, start, synced, runErrors); logErr != nil {

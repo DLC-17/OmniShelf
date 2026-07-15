@@ -6,6 +6,7 @@ import type { Card } from '../../api/cards'
 import { captureVideoFrame, fileToJpegBlob } from '../../lib/cardImage'
 import { isSecureContext } from '../../lib/secureContext'
 import CardConfirmCard from './CardConfirmCard'
+import { isMobileDevice } from '../../lib/device'
 
 /** Human-readable explanation for each identify miss the backend reports. */
 function scanErrorMessage(err: unknown): string {
@@ -41,7 +42,7 @@ export default function CardScan() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cameraDenied, setCameraDenied] = useState(false)
-  const [uploadMode, setUploadMode] = useState(false)
+  const [uploadMode, setUploadMode] = useState(!isMobileDevice())
   const videoRef = useRef<HTMLVideoElement>(null)
 
   const showUpload = !secure || cameraDenied || uploadMode
@@ -164,14 +165,25 @@ export default function CardScan() {
 
       {cameraActive && (
         <div className="stack">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            data-testid="card-camera"
-            style={{ width: '100%', maxWidth: '28rem', borderRadius: '0.5rem' }}
-          />
+          <div className="card-camera-container">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              data-testid="card-camera"
+              style={{ width: '100%', maxWidth: '28rem', borderRadius: '0.5rem' }}
+            />
+            <div className="card-alignment-overlay" aria-hidden="true">
+              <div className="card-guide-outline">
+                <div className="card-guide-corner card-guide-corner-tl"></div>
+                <div className="card-guide-corner card-guide-corner-tr"></div>
+                <div className="card-guide-corner card-guide-corner-bl"></div>
+                <div className="card-guide-corner card-guide-corner-br"></div>
+              </div>
+              <div className="card-instruction">Center card within the frame</div>
+            </div>
+          </div>
           <div className="cluster">
             <button type="button" className="btn-primary" onClick={handleCapture} disabled={busy}>
               Capture card

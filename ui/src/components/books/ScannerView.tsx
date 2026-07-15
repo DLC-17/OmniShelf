@@ -60,5 +60,23 @@ export default function ScannerView({ onDetected, onCameraError }: ScannerViewPr
     }
   }, [])
 
-  return <div id={SCANNER_ELEMENT_ID} data-testid="scanner-view" />
+  return (
+    <div className="scanner-view-container">
+      <div id={SCANNER_ELEMENT_ID} data-testid="scanner-view" />
+      <div className="scanner-overlay" aria-hidden="true">
+        <div className="scanner-mask-top"></div>
+        <div className="scanner-mask-left"></div>
+        <div className="scanner-mask-right"></div>
+        <div className="scanner-mask-bottom"></div>
+        <div className="scanner-target-box">
+          <div className="scanner-corner scanner-corner-tl"></div>
+          <div className="scanner-corner scanner-corner-tr"></div>
+          <div className="scanner-corner scanner-corner-bl"></div>
+          <div className="scanner-corner scanner-corner-br"></div>
+          <div className="scanner-laser"></div>
+        </div>
+        <div className="scanner-instruction">Align barcode within the guides</div>
+      </div>
+    </div>
+  )
 }

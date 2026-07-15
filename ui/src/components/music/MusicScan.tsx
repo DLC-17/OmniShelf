@@ -8,6 +8,7 @@ import { musicScanTarget } from '../../lib/scanTargets'
 import BulkScanner from '../books/BulkScanner'
 import ScannerView from '../books/ScannerView'
 import AlbumConfirmCard from './AlbumConfirmCard'
+import { isMobileDevice } from '../../lib/device'
 
 type ScanMode = 'camera' | 'bulk'
 
@@ -27,6 +28,7 @@ export default function MusicScan() {
   const [notFound, setNotFound] = useState<string | null>(null)
   const [cameraDenied, setCameraDenied] = useState(false)
   const [manualValue, setManualValue] = useState('')
+  const [cameraStarted, setCameraStarted] = useState(isMobileDevice())
 
   const handleBarcode = async (barcode: string) => {
     setError(null)
@@ -53,6 +55,7 @@ export default function MusicScan() {
     setNotFound(null)
     setCameraDenied(false)
     setManualValue('')
+    setCameraStarted(isMobileDevice())
   }
 
   if (album !== null) {
@@ -65,7 +68,7 @@ export default function MusicScan() {
     if (trimmed !== '') void handleBarcode(trimmed)
   }
 
-  const showManual = !secure || cameraDenied
+  const showManual = !secure || cameraDenied || !cameraStarted
 
   return (
     <div className="stack">
@@ -75,7 +78,10 @@ export default function MusicScan() {
           role="tab"
           aria-selected={mode === 'bulk'}
           className={mode === 'bulk' ? 'tab active' : 'tab'}
-          onClick={() => setMode('bulk')}
+          onClick={() => {
+            setMode('bulk')
+            setCameraStarted(isMobileDevice())
+          }}
         >
           Handheld scanner
         </button>
@@ -84,7 +90,10 @@ export default function MusicScan() {
           role="tab"
           aria-selected={mode === 'camera'}
           className={mode === 'camera' ? 'tab active' : 'tab'}
-          onClick={() => setMode('camera')}
+          onClick={() => {
+            setMode('camera')
+            setCameraStarted(isMobileDevice())
+          }}
         >
           Camera
         </button>
@@ -123,31 +132,47 @@ export default function MusicScan() {
             </p>
           )}
 
-          {secure && !cameraDenied && (
-            <ScannerView onDetected={handleBarcode} onCameraError={() => setCameraDenied(true)} />
+          {secure && !cameraDenied && cameraStarted && (
+            <div className="stack">
+              <ScannerView onDetected={handleBarcode} onCameraError={() => setCameraDenied(true)} />
+              <div>
+                <button type="button" className="btn-ghost" onClick={() => setCameraStarted(false)}>
+                  Enter barcode manually
+                </button>
+              </div>
+            </div>
           )}
 
           {looking && <p role="status" className="muted">Looking up…</p>}
 
           {showManual && (
-            <form className="searchbar" onSubmit={submitManual}>
-              <label className="field grow">
-                <span>Barcode</span>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  aria-label="Barcode"
-                  placeholder="602547790392"
-                  value={manualValue}
-                  onChange={(e) => setManualValue(e.target.value)}
-                  disabled={looking}
-                  style={{ flex: 1 }}
-                />
-              </label>
-              <button type="submit" className="btn-primary" disabled={looking || manualValue.trim() === ''}>
-                {looking ? 'Looking up…' : 'Look up'}
-              </button>
-            </form>
+            <div className="stack">
+              <form className="searchbar" onSubmit={submitManual}>
+                <label className="field grow">
+                  <span>Barcode</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    aria-label="Barcode"
+                    placeholder="602547790392"
+                    value={manualValue}
+                    onChange={(e) => setManualValue(e.target.value)}
+                    disabled={looking}
+                    style={{ flex: 1 }}
+                  />
+                </label>
+                <button type="submit" className="btn-primary" disabled={looking || manualValue.trim() === ''}>
+                  {looking ? 'Looking up…' : 'Look up'}
+                </button>
+              </form>
+              {secure && !cameraDenied && !cameraStarted && (
+                <div>
+                  <button type="button" className="btn-ghost" onClick={() => setCameraStarted(true)}>
+                    Use camera scanner
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </>
       )}

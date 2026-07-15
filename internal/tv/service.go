@@ -319,7 +319,7 @@ const (
 func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, error) {
 	var sources []models.TrackingItem
 	if err := s.db.WithContext(ctx).
-		Where("user_id = ? AND type = ?", userID, "TV").
+		Where("user_id = ? AND type = ? AND rating >= 4", userID, "TV").
 		Order("updated_at DESC").Limit(maxDiscoverSources).
 		Find(&sources).Error; err != nil {
 		return nil, fmt.Errorf("tv: discover sources: %w", err)
@@ -794,4 +794,42 @@ func parseAirDate(s string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// ReconcileAllWatching sweeps every user's WATCHING TV items and flips any
+// show where all aired, non-Season-0 episodes are watched to COMPLETED.
+// It is called by the nightly sync engine after the per-show metadata sweep
+// so that a completed show is marked finished even if the user never triggers
+// an individual watch-toggle after the last episode.
+func (s *Service) ReconcileAllWatching(ctx context.Context) error {
+	var items []models.TrackingItem
+	if err := s.db.WithContext(ctx).
+		Where("type = ? AND status = ?", "TV", "WATCHING").
+		Find(&items).Error; err != nil {
+		return fmt.Errorf("tv: reconcile all: load watching items: %w", err)
+	}
+	for _, it := range items {
+		tmdbID, err := strconv.Atoi(it.ExternalID)
+		if err != nil {
+			continue
+		}
+		var show models.Show
+		if err := s.db.WithContext(ctx).Where("tmdb_id = ?", tmdbID).First(&show).Error; err != nil {
+			continue // metadata missing; skip
+		}
+		next, err := s.nextUp(ctx, it.UserID, show.ID)
+		if err != nil {
+			log.Printf("tv: reconcile all: nextUp for user %d show %d: %v", it.UserID, show.ID, err)
+			continue
+		}
+		if next != nil {
+			continue // still has unwatched episodes
+		}
+		// All aired non-S0 episodes are watched: flip to COMPLETED.
+		if err := s.db.WithContext(ctx).Model(&models.TrackingItem{}).
+			Where("id = ?", it.ID).Update("status", "COMPLETED").Error; err != nil {
+			log.Printf("tv: reconcile all: update user %d item %d to COMPLETED: %v", it.UserID, it.ID, err)
+		}
+	}
+	return nil
 }

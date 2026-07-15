@@ -360,12 +360,13 @@ func TestDiscoverSimilarGamesDedupesTracked(t *testing.T) {
 		},
 	}
 	imgs := &fakeImages{}
-	svc, _ := newEnrichedService(t, &fakeMetadata{}, enr, imgs)
+	svc, gdb := newEnrichedService(t, &fakeMetadata{}, enr, imgs)
 	ctx := context.Background()
 
 	// Track Zelda by IGDB id so it becomes a discover seed.
 	_, _, err := svc.AddByIGDB(ctx, 1, 7346, StatusPlaying)
 	require.NoError(t, err)
+	require.NoError(t, gdb.Model(&models.TrackingItem{}).Where("user_id = ? AND external_id = ?", 1, "7346").Update("rating", 4).Error)
 
 	items, err := svc.Discover(ctx, 1)
 	require.NoError(t, err)

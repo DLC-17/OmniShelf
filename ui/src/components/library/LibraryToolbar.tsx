@@ -206,6 +206,22 @@ export default function LibraryToolbar({
     [filters],
   )
 
+  // Top tags for the quick-pill rail (up to 8, sorted by frequency)
+  const topTags = useMemo(() => {
+    const tagDef = ASPECTS[media].find((d) => d.aspect === 'tag')
+    if (!tagDef) return []
+    const freq = new Map<string, number>()
+    for (const item of items) {
+      for (const tag of tagDef.values(item)) {
+        freq.set(tag, (freq.get(tag) ?? 0) + 1)
+      }
+    }
+    return [...freq.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([tag]) => tag)
+  }, [items, media])
+
   // Close the dropdown on outside click or Escape while it is open.
   useEffect(() => {
     if (!open) return
@@ -244,49 +260,68 @@ export default function LibraryToolbar({
         value={search}
         onChange={(e) => onSearchChange(e.target.value)}
       />
-      {groups.length > 0 && (
-        <div className="filter-dropdown" ref={wrapRef}>
-          <button
-            type="button"
-            className="filter-trigger"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((v) => !v)}
-          >
-            Filters
-            {activeCount > 0 && <span className="badge">{activeCount}</span>}
-            <span className="show-caret" aria-hidden="true">
-              {open ? '▴' : '▾'}
-            </span>
-          </button>
-          {open && (
-            <div className="filter-panel" id={panelId} role="group" aria-label="Filters">
-              {groups.map(({ def, options }) => (
-                <fieldset key={def.aspect} className="filter-group">
-                  <legend>{def.label}</legend>
-                  {options.map((opt) => (
-                    <label key={opt} className="filter-option">
-                      <input
-                        type="checkbox"
-                        checked={(filters[def.aspect] ?? []).includes(opt)}
-                        onChange={() => toggleValue(def.aspect, opt)}
-                      />
-                      <span>{def.optionLabel ? def.optionLabel(opt) : opt}</span>
-                    </label>
-                  ))}
-                </fieldset>
-              ))}
-              {activeCount > 0 && (
-                <button
-                  type="button"
-                  className="btn-ghost filter-clear"
-                  onClick={() => onFiltersChange({})}
-                >
-                  Clear all
-                </button>
-              )}
-            </div>
-          )}
+      <div className="filter-dropdown" ref={wrapRef}>
+        <button
+          type="button"
+          className="filter-trigger"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={() => setOpen((v) => !v)}
+        >
+          Filters
+          {activeCount > 0 && <span className="badge">{activeCount}</span>}
+          <span className="show-caret" aria-hidden="true">
+            {open ? '▴' : '▾'}
+          </span>
+        </button>
+        {open && (
+          <div className="filter-panel" id={panelId} role="group" aria-label="Filters">
+            {groups.length === 0 && (
+              <p className="filter-empty">No filter options available.</p>
+            )}
+            {groups.map(({ def, options }) => (
+              <fieldset key={def.aspect} className="filter-group">
+                <legend>{def.label}</legend>
+                {options.map((opt) => (
+                  <label key={opt} className="filter-option">
+                    <input
+                      type="checkbox"
+                      checked={(filters[def.aspect] ?? []).includes(opt)}
+                      onChange={() => toggleValue(def.aspect, opt)}
+                    />
+                    <span>{def.optionLabel ? def.optionLabel(opt) : opt}</span>
+                  </label>
+                ))}
+              </fieldset>
+            ))}
+            {activeCount > 0 && (
+              <button
+                type="button"
+                className="btn-ghost filter-clear"
+                onClick={() => onFiltersChange({})}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      {topTags.length > 0 && (
+        <div className="tag-pill-rail" aria-label="Quick tag filters">
+          {topTags.map((tag) => {
+            const active = (filters.tag ?? []).includes(tag)
+            return (
+              <button
+                key={tag}
+                type="button"
+                className={active ? 'tag-pill active' : 'tag-pill'}
+                aria-pressed={active}
+                onClick={() => toggleValue('tag', tag)}
+              >
+                {tag}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

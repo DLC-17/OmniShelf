@@ -575,7 +575,8 @@ func TestDiscoverExcludesTrackedAndRejected(t *testing.T) {
 		},
 	}
 	svc, gdb := newTestService(t, fake, &fakeImages{})
-	addFixtureShow(t, svc) // user tracks show 100
+	res := addFixtureShow(t, svc) // user tracks show 100
+	require.NoError(t, gdb.Model(&res.Item).Update("rating", 4).Error)
 
 	// User already tracks 200, and has rejected 300.
 	require.NoError(t, gdb.Create(&models.TrackingItem{UserID: userID, Type: "TV", ExternalID: "200", Title: "Already Tracked", Status: "WATCHING"}).Error)

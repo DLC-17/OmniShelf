@@ -1,195 +1,175 @@
 # OmniShelf
 
-A local-first, self-hosted media tracker for TV shows, movies, books, and video
-games. OmniShelf ships as a **single Go binary** with the React frontend
-embedded via `go:embed`, running in **one Docker container** on TrueNAS SCALE.
+A local-first, self-hosted media tracker for TV shows, movies, books, video games, music albums, and trading cards. OmniShelf ships as a **single Go binary** with the React frontend embedded via `go:embed`, running in **one Docker container** on TrueNAS SCALE.
 
 - `/` — embedded React SPA
 - `/api/*` — JSON REST API (JWT in an HttpOnly cookie)
-- `/images/*` — cached posters/covers served off the NAS
+- `/images/*` — cached/uploaded posters, covers, and artwork served off the NAS
 - Nightly TMDB sync (03:00) and a legacy TV Time CSV importer
 - Barcode scanning for books (ISBN → OpenLibrary) and games (UPC/EAN → ScanDex + IGDB)
+- Barcode scanning for music (UPC/EAN → Discogs + MusicBrainz)
+- Photo scanning for trading cards (Image → Google Vision OCR → YGOPRODeck / Pokémon TCG API)
 - SQLite (WAL) for storage — no external database
 
-## Security model
+---
 
-OmniShelf is designed for a **trusted household on a private network**
-(LAN and/or Tailscale). It is *not* hardened for exposure to the open
-internet — do not port-forward it. Highlights:
+## Supported Media Types & Modules
 
-- **Invite-only registration** — no open signup, no default account. Codes are
-  single-use, generated with `crypto/rand`, and consumed atomically.
-- **Sessions** — 7-day HMAC-SHA256 JWTs in an `HttpOnly`, `SameSite=Lax`
-  cookie; passwords hashed with bcrypt (cost 12).
-- **Brute-force protection** — 10 failed login/invite attempts per source IP
-  in 15 minutes returns `429 rate_limited`. Proxy headers are not trusted for
-  the client IP.
-- **Secret hygiene** — the app refuses to start if `OMNISHELF_JWT_SECRET` is
-  unset, shorter than 32 characters, or left at the `.env.example`
-  placeholder. Third-party API keys stay server-side and are never sent to
-  the browser.
-- **Container** — runs as unprivileged UID 568 (the TrueNAS SCALE `apps`
-  user), not root.
-- **HTTP hardening** — security headers incl. a same-origin Content-Security-
-  Policy, `nosniff`, and clickjacking denial; request-body caps on the
-  unauthenticated auth endpoints; read-header/idle timeouts on the server.
-- **TLS** — the app serves plain HTTP and does not terminate TLS; Tailscale
-  (or another reverse proxy) provides HTTPS. Because the LAN origin is plain
-  HTTP, the session cookie is deliberately **not** marked `Secure`.
+OmniShelf acts as a unified shelf for multiple media categories, utilizing specific external APIs and services to cache metadata locally:
 
-## Building & running locally
+### 📺 TV Shows & 🎬 Movies
+*   **Source:** [The Movie Database (TMDB)](https://www.themoviedb.org/) (requires `TMDB_API_KEY`).
+*   **TV Shows:** Tracks watch state at the episode level. The **Up Next** watchlist surfaces the next unwatched aired episode for one-tap progress tracking.
+*   **Nightly Sync:** In-process scheduler updates all watched/plan-to-watch shows at 03:00 AM for new episodes and air dates.
+*   **CSV Importer:** Resolves legacy TV Time CSV exports (`followed_shows.csv` / `seen_episodes.csv`) via normalized Levenshtein similarity.
+*   **Movies:** Plain watchlist tracking (`PLAN_TO` / `COMPLETED`) without episodes or seasons.
+
+### 📚 Books
+*   **Source:** [OpenLibrary](https://openlibrary.org/) (requires `OMNISHELF_CONTACT_EMAIL` for User-Agent compliance).
+*   **Identification:** Scan book EAN-13 ISBN barcodes using the browser camera or a handheld scanner. Falls back to text ISBN lookup or search.
+*   **Tracking:** Supports page number progress tracking and timestamped text journal notes.
+
+### 🎮 Video Games
+*   **Source:** [ScanDex](https://scandex.net/) (optional barcode lookup) and [IGDB](https://www.igdb.com/) (optional cover, summaries, genres/keywords via Twitch OAuth).
+*   **Identification:** Scan game UPC/EAN barcodes to resolve title/platform via ScanDex, then enrich metadata and covers via IGDB. Falls back to IGDB text search.
+*   **Tracking:** Supports status updates (`PLAYING`, `PLAN_TO`, `COMPLETED`, `STOPPED`) and ownership tracking (`Physical`, `GOG`).
+
+### 🎵 Music Albums
+*   **Source:** [Discogs](https://www.discogs.com/) (optional barcode lookup) and [MusicBrainz](https://musicbrainz.org/) (optional name search and release-group lookup).
+*   **Identification:** Scan music UPC/EAN barcodes via Discogs, or search by album/artist name via MusicBrainz.
+*   **Tracking:** Artist-grouped list showing listen states (`LISTENING`, `PLAN_TO`, `COMPLETED`, `STOPPED`) and ownership formats (`Vinyl`, `CD`).
+
+### 🃏 Trading Cards
+*   **Source:** Google Cloud Vision OCR (requires `GOOGLE_APPLICATION_CREDENTIALS` service account), [YGOPRODeck](https://ygoprodeck.com/) (Yu-Gi-Oh!), and the [Pokémon TCG API](https://pokemontcg.io/) (Pokémon).
+*   **Identification:** Snap a photo of a card; Google Vision OCR extracts text, classifying the card as Yu-Gi-Oh! (matches printed set code) or Pokémon (matches name and collector number), then resolves it against the upstream catalog.
+*   **Tracking:** Track cards you own (`OWNED` status) with support for card formats (`Holo`, `Reverse Holo`).
+
+---
+
+## Security Model
+
+OmniShelf is designed for a **trusted household on a private network** (LAN and/or Tailscale). It is *not* hardened for exposure to the open internet — do not port-forward it.
+
+*   **Invite-only Registration:** No open signup, no default account. Single-use invitation codes are generated via `crypto/rand` using the admin CLI.
+*   **Sessions:** 7-day HMAC-SHA256 JWTs in an `HttpOnly`, `SameSite=Lax` cookie. Passwords hashed using `bcrypt` (cost 12).
+*   **Brute-force Protection:** 10 failed login/invite attempts per source IP within a 15-minute window returns `429 rate_limited`. Proxy headers are not trusted for client IP mapping.
+*   **Secret Hygiene:** The application refuses to start if `OMNISHELF_JWT_SECRET` is unset, shorter than 32 characters, or matches the `.env.example` placeholder. Third-party API keys remain server-side.
+*   **Container Privilege:** Runs as unprivileged UID/GID 568 (the TrueNAS SCALE `apps` user), not root.
+*   **HTTP Hardening:** Security headers include a same-origin Content-Security-Policy (CSP), `X-Content-Type-Options: nosniff`, and clickjacking protections.
+*   **TLS:** Serves plain HTTP and does not terminate TLS; Tailscale or a reverse proxy handles HTTPS. LAN session cookies are deliberately **not** marked `Secure` to allow HTTP LAN access.
+
+---
+
+## Building & Running Locally
+
+The UI must be compiled before building the Go server so that `go:embed` can bundle the production assets:
 
 ```sh
-# Frontend must be built first so go:embed picks up ui/dist.
+# 1. Build the React frontend
 cd ui && npm ci && npm run build && cd ..
+
+# 2. Build the CGO-free Go binary
 CGO_ENABLED=0 go build -o omnishelf ./cmd/omnishelf
 
+# 3. Create folders and run
+mkdir -p ./data ./images
 OMNISHELF_JWT_SECRET="$(openssl rand -hex 32)" \
 OMNISHELF_DATA_DIR=./data OMNISHELF_IMAGES_DIR=./images \
 TMDB_API_KEY=... OMNISHELF_CONTACT_EMAIL=you@example.com \
 ./omnishelf
 ```
 
-The app listens on `:8080` (`http://localhost:8080`). For repeat runs, copy
-`.env.example` to `.env` and fill it in (never commit `.env` — it is
-gitignored). Note the JWT secret must survive restarts or every session is
-invalidated, so persist the generated value rather than regenerating per run.
+The server listens on `:8080` (`http://localhost:8080`). For repeated local runs, copy `.env.example` to `.env` and fill it out (never commit `.env`). The JWT secret should remain stable to preserve sessions across restarts.
 
 ---
 
 ## Deployment (TrueNAS SCALE)
 
-OmniShelf runs as a single Docker container. Build the image (multi-stage
-`Dockerfile` builds the SPA and a CGO-free binary):
+OmniShelf runs as a single Docker container. Build the image:
 
 ```sh
 docker build -t omnishelf:latest .
 ```
 
-Push it to a registry the NAS can reach, or load it onto the host directly
-(`docker save omnishelf:latest | ssh <nas> docker load`).
+### 1. Host Datasets & Permissions
 
-### 1. Host datasets & permissions
+Create two persistent datasets on your pool and map them into the container. The database and cached images must live **outside** the container to survive updates:
 
-Create two persistent datasets on your pool and map them into the container.
-The database and cached images live **outside** the container so they survive
-image upgrades:
+| Host Path (Dataset) | Container Path | Purpose |
+| :--- | :--- | :--- |
+| `/mnt/media-tracker/data` | `/data` | SQLite database + WAL files |
+| `/mnt/media-tracker/images` | `/images` | Mapped folder for cached/uploaded artwork |
 
-| Host path (dataset)         | Container path | Purpose                      |
-|-----------------------------|----------------|------------------------------|
-| `/mnt/media-tracker/data`   | `/data`        | SQLite DB + WAL files        |
-| `/mnt/media-tracker/images` | `/images`      | Cached posters / book covers |
-
-The container runs as the unprivileged TrueNAS `apps` user (**UID/GID 568**),
-so both datasets must be writable by that user. Either set the dataset ACL
-owner to `apps` in the UI (Datasets → Permissions), or from the TrueNAS shell:
+The container runs as UID/GID **568** (`apps`). Grant appropriate write ownership:
 
 ```sh
 chown -R 568:568 /mnt/media-tracker/data /mnt/media-tracker/images
 ```
 
-OmniShelf probes both directories on startup and refuses to start (exit
-non-zero) if either is missing or read-only, so a broken volume mount or
-wrong ownership surfaces immediately in the app logs.
+OmniShelf checks both paths on startup and fails immediately if they are missing or unwritable.
 
-### 2. Generate the secrets
+### 2. Environment Variables & Secrets
+
+Generate a JWT secret (keep this stable to preserve sessions):
 
 ```sh
-openssl rand -hex 32   # → value for OMNISHELF_JWT_SECRET
+openssl rand -hex 32
 ```
 
-Keep this value stable across restarts and upgrades — changing it invalidates
-every session. Get a TMDB v3 API key from
-[themoviedb.org](https://www.themoviedb.org/settings/api); ScanDex and IGDB
-credentials are optional and only needed for the games module.
+| Env Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `OMNISHELF_PORT` | `8080` | HTTP listen port |
+| `OMNISHELF_DATA_DIR` | `/data` | SQLite directory path |
+| `OMNISHELF_IMAGES_DIR` | `/images` | Cached image path |
+| `OMNISHELF_JWT_SECRET` | *(required)* | HMAC signing key (≥ 32 chars) |
+| `TMDB_API_KEY` | *(required for TV/movies)* | TMDB v3 API Key |
+| `OMNISHELF_CONTACT_EMAIL` | *(required for books/music)* | Injected into OpenLibrary and MusicBrainz User-Agent |
+| `SCANDEX_USER_ID` | *(optional)* | ScanDex game barcode lookup user ID |
+| `SCANDEX_ACCESS_TOKEN` | *(optional)* | ScanDex game barcode lookup access token |
+| `IGDB_CLIENT_ID` | *(optional)* | IGDB client ID (Twitch Developer portal) |
+| `IGDB_CLIENT_SECRET` | *(optional)* | IGDB client secret (Twitch Developer portal) |
+| `OMNISHELF_DISCOGS_TOKEN` | *(optional)* | Discogs token for music barcode lookups |
+| `GOOGLE_APPLICATION_CREDENTIALS` | *(optional)* | Path to Google Cloud Vision JSON credentials |
+| `POKEMONTCG_API_KEY` | *(optional)* | Pokémon TCG API key (increases rate limit) |
 
-### 3. Create the Custom App
+### 3. Install the App
 
-Apps → **Discover Apps** → **⋮ → Install via YAML / Custom App**:
+Discover Apps → **Install via YAML / Custom App**:
+1. **Image:** `omnishelf:latest`
+2. **Port:** Container `8080` → Host `8080` (or any free port).
+3. **Storage:** Map the datasets above as **Host Path** volumes (`/data` and `/images`).
+4. **Environment:** Fill in the environment variables from the table above.
 
-1. **Image:** `omnishelf:latest` (or your registry tag).
-2. **Port:** container `8080` → host `8080` (or any free host port).
-3. **Storage:** add two **Host Path** volumes using the table above
-   (`/mnt/media-tracker/data` → `/data`, `/mnt/media-tracker/images` → `/images`).
-4. **Environment variables:** see the table below. TrueNAS stores app env
-   vars in its config — treat the JWT secret and API keys like passwords and
-   don't paste them into anything world-readable.
-5. Deploy. TrueNAS reads the container `HEALTHCHECK` (`GET /api/health`) and
-   marks the app healthy once the DB ping and images volume both pass.
+### Health Check
 
-### Environment variables
-
-| Var                       | Default        | Purpose                                                          |
-|---------------------------|----------------|------------------------------------------------------------------|
-| `OMNISHELF_PORT`          | `8080`         | HTTP listen port                                                 |
-| `OMNISHELF_DATA_DIR`      | `/data`        | SQLite location (map to `/mnt/media-tracker/data`)               |
-| `OMNISHELF_IMAGES_DIR`    | `/images`      | Cached image root (map to `/mnt/media-tracker/images`)           |
-| `OMNISHELF_JWT_SECRET`    | **(required)** | HMAC signing key, ≥ 32 chars. App refuses to start if unset, too short, or left at the example placeholder. |
-| `TMDB_API_KEY`            | **(required for TV/movies)** | TMDB v3 API key (never sent to the browser)        |
-| `OMNISHELF_CONTACT_EMAIL` | **(required for books)** | Injected into the OpenLibrary `User-Agent`             |
-| `SCANDEX_USER_ID`         | *(optional)*   | ScanDex game barcode lookups; unset → games module reports "not configured" |
-| `SCANDEX_ACCESS_TOKEN`    | *(optional)*   | ScanDex access token                                             |
-| `IGDB_CLIENT_ID`          | *(optional)*   | IGDB (Twitch developer) client for game covers/summaries         |
-| `IGDB_CLIENT_SECRET`      | *(optional)*   | IGDB client secret                                               |
-
-### Health check
-
-`GET /api/health` is **unauthenticated** and returns
-`200 {"status":"ok","db":"ok"}` when the SQLite ping and the images volume are
-both healthy, or `503` otherwise (failure specifics go to the container logs,
-not the response). The container's `HEALTHCHECK` polls it:
+`GET /api/health` returns `200 {"status":"ok","db":"ok"}` when the database and `/images` dir are healthy, and `503` on failure. The container configures this automatically:
 
 ```dockerfile
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
 ```
 
-### First-run: bootstrap an invite code
+### First-run: Bootstrap an Invite Code
 
-Registration is invite-only. There is no default account — generate a
-single-use invite code with the built-in `invite` subcommand, then hand it to
-your first user so they can register. Run it inside the container so it uses
-the same `/data` database and env vars:
+Run this inside the container to mint a single-use registration code:
 
 ```sh
-# From the TrueNAS shell (adjust the app/container name):
 docker exec -it <omnishelf-container> omnishelf invite create
-# prints e.g.  K7QP4MNR9TX2WJ3H
+# prints e.g. K7QP4MNR9TX2WJ3H
 ```
 
-The user visits the app, registers with `{username, password, inviteCode}`,
-and the code is consumed atomically (a second attempt with the same code gets
-a 409). Repeat `invite create` for each additional household member.
+The user visits the site, enters the code, and registers their credentials.
 
-### Mobile barcode scanning needs HTTPS (Tailscale)
+### Mobile Barcode/Photo Scanning Needs HTTPS (Tailscale)
 
-The barcode scanner uses the browser camera API, which browsers only expose
-in a **Secure Context** (HTTPS or `localhost`). Over plain LAN HTTP
-(`http://<nas-ip>:8080`) mobile browsers block the camera, and the Scan page
-detects this and shows a banner pointing you at the HTTPS URL instead of a
-broken camera view.
+Modern browsers only expose the camera API (`getUserMedia`) in a **Secure Context** (HTTPS or `localhost`). Over plain HTTP LAN (`http://<nas-ip>:8080`), camera access is blocked.
 
-To scan on a phone, reach OmniShelf over **Tailscale**, which terminates
-HTTPS for you:
+To scan cards or barcodes on a phone, access OmniShelf over **Tailscale** (which handles HTTPS automatically):
 
 ```
 https://omnishelf.<your-tailnet>.ts.net
 ```
 
-1. Install Tailscale on the NAS (or run OmniShelf behind a Tailscale sidecar)
-   and enable **HTTPS certificates** / MagicDNS in the Tailscale admin console.
-2. Expose port 8080 via `tailscale serve` so the tailnet hostname proxies to
-   the container. Prefer `serve` (tailnet-only) over Funnel — Funnel publishes
-   the app to the public internet, which this app is not hardened for.
-3. Open the `https://…ts.net` URL on your phone — the Secure Context unlocks
-   the camera and barcode scanning works. All API/image paths are relative, so
-   the same build works on both the LAN-IP and Tailscale origins with no
-   reconfig.
-
-### Upgrading
-
-1. Build and push the new image tag.
-2. Update the Custom App's image reference and redeploy — `/data` and
-   `/images` live on the host datasets, so nothing is lost. SQLite schema
-   migrations run automatically at startup.
-3. Keep `OMNISHELF_JWT_SECRET` unchanged so existing sessions survive.
+1. Install Tailscale on your NAS and enable HTTPS certificates / MagicDNS in the Tailscale console.
+2. Expose port 8080 via `tailscale serve` so the Tailnet hostname proxies to the container. (Do NOT use `funnel`, which exposes it to the open internet).
+3. Open the `https://...ts.net` URL on your phone to unlock camera permissions.

@@ -95,6 +95,9 @@ func runServer() error {
 	discogsClient := discogs.New(cfg.DiscogsToken)
 	musicbrainzClient := musicbrainz.New(cfg.ContactEmail)
 	visionClient := vision.New(cfg.GoogleVisionCredentials)
+	if !visionClient.Configured() {
+		log.Print("card scanning disabled: GOOGLE_APPLICATION_CREDENTIALS is not set; card scan requests will return 503")
+	}
 	ygoprodeckClient := ygoprodeck.New()
 	pokemontcgClient := pokemontcg.New(cfg.PokemonTCGAPIKey)
 	imageStore := images.New(cfg.ImagesDir)
@@ -142,7 +145,9 @@ func runServer() error {
 	api.RegisterUserRoutes(protected, gdb)
 
 	// Nightly TMDB sync at 03:00.
-	engine := syncengine.New(gdb, tmdbClient, imageStore)
+	engine := syncengine.New(gdb, tmdbClient, imageStore,
+		syncengine.WithReconcileWatching(tvSvc.ReconcileAllWatching),
+	)
 	scheduler := cron.New()
 	if err := engine.Schedule(scheduler); err != nil {
 		return fmt.Errorf("scheduling nightly sync: %w", err)

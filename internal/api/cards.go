@@ -130,6 +130,7 @@ func (h *cardsHandler) scan(c *gin.Context) {
 	var notFound *cards.NotFoundError
 	switch {
 	case errors.Is(err, cards.ErrNotConfigured):
+		log.Print("card scan rejected: Vision OCR is not configured — set GOOGLE_APPLICATION_CREDENTIALS to a GCP service-account JSON file path")
 		Error(c, http.StatusServiceUnavailable, CodeUpstreamError, "card scanning is not configured")
 	case errors.Is(err, cards.ErrNoText):
 		Error(c, http.StatusNotFound, CodeNoTextDetected, "No text detected on image")

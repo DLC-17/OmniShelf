@@ -760,7 +760,7 @@ func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, er
 	// Seeds: the most recently updated tracked books, for their authors/subjects.
 	var sources []models.TrackingItem
 	if err := s.db.WithContext(ctx).
-		Where("user_id = ? AND type = ?", userID, TypeBook).
+		Where("user_id = ? AND type = ? AND rating >= 4", userID, TypeBook).
 		Order("updated_at DESC").Limit(maxBookDiscoverSources).
 		Find(&sources).Error; err != nil {
 		return nil, fmt.Errorf("books: discover sources: %w", err)

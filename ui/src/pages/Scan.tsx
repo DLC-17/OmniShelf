@@ -4,6 +4,7 @@ import { ApiError } from '../api/client'
 import { scanBook } from '../api/books'
 import type { Book } from '../api/books'
 import { isSecureContext } from '../lib/secureContext'
+import { isMobileDevice } from '../lib/device'
 import { bookScanTarget, gameScanTarget } from '../lib/scanTargets'
 import ScannerView from '../components/books/ScannerView'
 import BookConfirmCard from '../components/books/BookConfirmCard'
@@ -48,7 +49,7 @@ export default function Scan() {
   const [error, setError] = useState<string | null>(null)
   const [notFoundIsbn, setNotFoundIsbn] = useState<string | null>(null)
   const [cameraDenied, setCameraDenied] = useState(false)
-  const [manualMode, setManualMode] = useState(false)
+  const [manualMode, setManualMode] = useState(!isMobileDevice())
 
   const handleIsbn = async (isbn: string) => {
     setError(null)
@@ -74,7 +75,7 @@ export default function Scan() {
     setError(null)
     setNotFoundIsbn(null)
     setCameraDenied(false)
-    setManualMode(false)
+    setManualMode(!isMobileDevice())
   }
 
   if (book !== null) {
@@ -215,8 +216,8 @@ export default function Scan() {
                   />
                   {secure && (
                     <div>
-                      <button type="button" className="btn-ghost" onClick={reset}>
-                        Back to scanner
+                      <button type="button" className="btn-ghost" onClick={() => setManualMode(false)}>
+                        Use camera scanner
                       </button>
                     </div>
                   )}

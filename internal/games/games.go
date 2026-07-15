@@ -452,7 +452,7 @@ func (s *Service) Discover(ctx context.Context, userID uint) ([]DiscoverItem, er
 
 	var sources []models.TrackingItem
 	if err := s.db.WithContext(ctx).
-		Where("user_id = ? AND type = ?", userID, TypeGame).
+		Where("user_id = ? AND type = ? AND rating >= 4", userID, TypeGame).
 		Order("updated_at DESC").Limit(maxDiscoverSources).
 		Find(&sources).Error; err != nil {
 		return nil, fmt.Errorf("games: discover sources: %w", err)
