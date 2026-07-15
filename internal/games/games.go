@@ -119,6 +119,16 @@ func (s *Service) Scan(ctx context.Context, barcode string) (*models.Game, error
 	var cached models.Game
 	err = s.db.WithContext(ctx).Where(&models.Game{Barcode: norm}).First(&cached).Error
 	if err == nil {
+		if cached.CoverPath == "" && s.enrich != nil {
+			gameTags := s.enrichFromIGDB(ctx, &cached)
+			if cached.CoverPath != "" {
+				if err := s.db.WithContext(ctx).Model(&cached).Update("cover_path", cached.CoverPath).Error; err == nil {
+					if len(gameTags) > 0 {
+						_ = tags.NewStore(s.db).Set(ctx, tags.TypeGame, cached.ID, gameTags)
+					}
+				}
+			}
+		}
 		return &cached, nil
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -353,6 +363,21 @@ func (s *Service) AddByIGDB(ctx context.Context, userID uint, igdbID int, status
 	var game models.Game
 	if existing != nil {
 		game = *existing
+		if game.CoverPath == "" && s.enrich != nil && game.IGDBID != 0 {
+			detail, derr := s.enrich.GetGame(ctx, game.IGDBID)
+			if derr == nil && detail != nil {
+				if game.Description == "" {
+					game.Description = detail.Summary
+				}
+				if game.ReleaseDate == "" {
+					game.ReleaseDate = detail.ReleaseDate
+				}
+				s.downloadCover(ctx, &game, detail.CoverImageID)
+				if game.CoverPath != "" {
+					_ = s.db.WithContext(ctx).Model(&game).Update("cover_path", game.CoverPath).Error
+				}
+			}
+		}
 	} else {
 		if s.enrich == nil {
 			return nil, nil, ErrSearchUnavailable
