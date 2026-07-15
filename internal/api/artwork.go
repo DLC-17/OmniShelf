@@ -71,7 +71,7 @@ func (h *artworkHandler) upload(c *gin.Context) {
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "could not read the uploaded file")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	rel, err := h.svc.Upload(c.Request.Context(), CurrentUserID(c), itemID, file)
 	if err != nil {

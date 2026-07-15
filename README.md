@@ -79,7 +79,7 @@ TMDB_API_KEY=... OMNISHELF_CONTACT_EMAIL=you@example.com \
 ./omnishelf
 ```
 
-The server listens on `:8080` (`http://localhost:8080`). For repeated local runs, copy `.env.example` to `.env` and fill it out (never commit `.env`). The JWT secret should remain stable to preserve sessions across restarts.
+The app listens on `:8080` (`http://localhost:8080`). For repeat runs, copy `.env.example` to `.env` and fill it in. Note the JWT secret must survive restarts or every session is invalidated, so persist the generated value rather than regenerating per run.
 
 ---
 

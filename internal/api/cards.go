@@ -119,7 +119,7 @@ func (h *cardsHandler) scan(c *gin.Context) {
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "could not read the uploaded file")
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	imageBytes, err := io.ReadAll(file)
 	if err != nil || len(imageBytes) == 0 {
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "could not read the uploaded file")

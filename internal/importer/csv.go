@@ -200,7 +200,9 @@ func extractZip(f UploadFile) ([]UploadFile, error) {
 			return nil, validationErrorf("%s: cannot read zip entry %s", f.Name, name)
 		}
 		data, err := io.ReadAll(rc)
-		rc.Close()
+		if closeErr := rc.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
 		if err != nil {
 			return nil, validationErrorf("%s: cannot read zip entry %s", f.Name, name)
 		}

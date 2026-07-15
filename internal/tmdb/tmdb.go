@@ -307,7 +307,7 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 
 		if resp.StatusCode == http.StatusTooManyRequests {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if attempt >= maxAttempts {
 				return &StatusError{StatusCode: resp.StatusCode, Body: string(body)}
 			}
@@ -322,12 +322,12 @@ func (c *Client) get(ctx context.Context, path string, query url.Values, out any
 
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return &StatusError{StatusCode: resp.StatusCode, Body: string(body)}
 		}
 
 		err = json.NewDecoder(resp.Body).Decode(out)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			return fmt.Errorf("tmdb: decode %s: %w", path, err)
 		}

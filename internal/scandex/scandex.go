@@ -136,7 +136,7 @@ func (c *Client) Lookup(ctx context.Context, barcode string) (*Game, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scandex: request lookup: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
 

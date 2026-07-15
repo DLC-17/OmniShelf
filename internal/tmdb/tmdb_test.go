@@ -40,7 +40,7 @@ func TestSearchTV(t *testing.T) {
 		assert.Equal(t, "game of thrones", r.URL.Query().Get("query"))
 		assert.Equal(t, "test-key", r.URL.Query().Get("api_key"))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "search_tv.json"))
+		_, _ = w.Write(fixture(t, "search_tv.json"))
 	}))
 	defer srv.Close()
 
@@ -61,7 +61,7 @@ func TestSearchMovie(t *testing.T) {
 		assert.Equal(t, "inception", r.URL.Query().Get("query"))
 		assert.Equal(t, "test-key", r.URL.Query().Get("api_key"))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"page":1,"results":[{"id":27205,"title":"Inception","overview":"A thief.","release_date":"2010-07-15","poster_path":"/x.jpg"}],"total_results":1,"total_pages":1}`))
+		_, _ = w.Write([]byte(`{"page":1,"results":[{"id":27205,"title":"Inception","overview":"A thief.","release_date":"2010-07-15","poster_path":"/x.jpg"}],"total_results":1,"total_pages":1}`))
 	}))
 	defer srv.Close()
 
@@ -79,7 +79,7 @@ func TestGetMovie(t *testing.T) {
 		assert.Equal(t, "/movie/27205", r.URL.Path)
 		assert.Equal(t, "keywords", r.URL.Query().Get("append_to_response"))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":27205,"title":"Inception","overview":"A thief.","status":"Released","release_date":"2010-07-15","poster_path":"/x.jpg","keywords":{"keywords":[{"id":1,"name":"dream"},{"id":2,"name":"heist"}]}}`))
+		_, _ = w.Write([]byte(`{"id":27205,"title":"Inception","overview":"A thief.","status":"Released","release_date":"2010-07-15","poster_path":"/x.jpg","keywords":{"keywords":[{"id":1,"name":"dream"},{"id":2,"name":"heist"}]}}`))
 	}))
 	defer srv.Close()
 
@@ -96,7 +96,7 @@ func TestMovieRecommendations(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/movie/27205/recommendations", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"page":1,"results":[{"id":348350,"title":"Solo","release_date":"2018-05-15","poster_path":"/s.jpg"}],"total_results":1,"total_pages":1}`))
+		_, _ = w.Write([]byte(`{"page":1,"results":[{"id":348350,"title":"Solo","release_date":"2018-05-15","poster_path":"/s.jpg"}],"total_results":1,"total_pages":1}`))
 	}))
 	defer srv.Close()
 
@@ -114,7 +114,7 @@ func TestGetShowKeywords(t *testing.T) {
 		assert.Equal(t, "/tv/1399", r.URL.Path)
 		assert.Equal(t, "keywords", r.URL.Query().Get("append_to_response"))
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":1399,"name":"Game of Thrones","status":"Ended","keywords":{"results":[{"id":1,"name":"dragon"},{"id":2,"name":"based on novel or book"}]}}`))
+		_, _ = w.Write([]byte(`{"id":1399,"name":"Game of Thrones","status":"Ended","keywords":{"results":[{"id":1,"name":"dragon"},{"id":2,"name":"based on novel or book"}]}}`))
 	}))
 	defer srv.Close()
 
@@ -127,7 +127,7 @@ func TestGetShow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/tv/1399", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "show_1399.json"))
+		_, _ = w.Write(fixture(t, "show_1399.json"))
 	}))
 	defer srv.Close()
 
@@ -146,7 +146,7 @@ func TestGetSeason(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/tv/1399/season/1", r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "season_1399_1.json"))
+		_, _ = w.Write(fixture(t, "season_1399_1.json"))
 	}))
 	defer srv.Close()
 
@@ -166,11 +166,11 @@ func Test429BackoffThenSuccess(t *testing.T) {
 		n := atomic.AddInt32(&calls, 1)
 		if n <= 2 {
 			w.WriteHeader(http.StatusTooManyRequests)
-			w.Write([]byte(`{"status_code":25,"status_message":"Your request count is over the allowed limit."}`))
+			_, _ = w.Write([]byte(`{"status_code":25,"status_message":"Your request count is over the allowed limit."}`))
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "show_1399.json"))
+		_, _ = w.Write(fixture(t, "show_1399.json"))
 	}))
 	defer srv.Close()
 
@@ -199,7 +199,7 @@ func Test429ThreeTimesFails(t *testing.T) {
 func TestRateLimiterHonored(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(fixture(t, "show_1399.json"))
+		_, _ = w.Write(fixture(t, "show_1399.json"))
 	}))
 	defer srv.Close()
 
@@ -228,7 +228,7 @@ func TestDefaultRateLimiterIsFourPerSecond(t *testing.T) {
 func TestNon200Error(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
+		_, _ = w.Write([]byte(`{"status_code":34,"status_message":"The resource you requested could not be found."}`))
 	}))
 	defer srv.Close()
 
