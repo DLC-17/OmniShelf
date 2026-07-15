@@ -30,9 +30,9 @@ COPY --from=go-builder /omnishelf /usr/local/bin/omnishelf
 RUN addgroup -g 568 -S omnishelf && adduser -u 568 -S -G omnishelf omnishelf
 USER 568:568
 
-EXPOSE 8080
+EXPOSE 8080 443
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8080/api/health || wget -qO- --no-check-certificate https://127.0.0.1:443/api/health || exit 1
 
 ENTRYPOINT ["omnishelf"]

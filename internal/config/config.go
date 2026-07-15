@@ -57,6 +57,13 @@ type Config struct {
 	// (POKEMONTCG_API_KEY). Optional: the API works keyless at lower rate
 	// limits.
 	PokemonTCGAPIKey string
+	// TLSCertFile is the path to a PEM-encoded TLS certificate
+	// (TLS_CERT_FILE). Optional: when set alongside TLSKeyFile the server
+	// listens on HTTPS instead of plain HTTP.
+	TLSCertFile string
+	// TLSKeyFile is the path to the PEM-encoded private key matching
+	// TLSCertFile (TLS_KEY_FILE). Both must be set to enable HTTPS.
+	TLSKeyFile string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -81,6 +88,9 @@ func Load() (*Config, error) {
 
 		GoogleVisionCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		PokemonTCGAPIKey:        os.Getenv("POKEMONTCG_API_KEY"),
+
+		TLSCertFile: os.Getenv("TLS_CERT_FILE"),
+		TLSKeyFile:  os.Getenv("TLS_KEY_FILE"),
 	}
 
 	if cfg.JWTSecret == "" {
@@ -96,6 +106,19 @@ func Load() (*Config, error) {
 	} {
 		if err := ensureWritableDir(dir.path); err != nil {
 			return nil, fmt.Errorf("%s (%s) is not a writable directory: %w", dir.name, dir.path, err)
+		}
+	}
+
+	// TLS: both must be set or both empty.
+	if (cfg.TLSCertFile == "") != (cfg.TLSKeyFile == "") {
+		return nil, fmt.Errorf("TLS_CERT_FILE and TLS_KEY_FILE must both be set to enable HTTPS (only one was provided)")
+	}
+	if cfg.TLSCertFile != "" {
+		if _, err := os.Stat(cfg.TLSCertFile); err != nil {
+			return nil, fmt.Errorf("TLS_CERT_FILE (%s): %w", cfg.TLSCertFile, err)
+		}
+		if _, err := os.Stat(cfg.TLSKeyFile); err != nil {
+			return nil, fmt.Errorf("TLS_KEY_FILE (%s): %w", cfg.TLSKeyFile, err)
 		}
 	}
 

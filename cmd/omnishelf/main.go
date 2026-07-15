@@ -174,8 +174,18 @@ func runServer() error {
 		c.FileFromFS(c.Request.URL.Path, assets)
 	})
 
-	addr := net.JoinHostPort("0.0.0.0", cfg.Port)
-	log.Printf("omnishelf listening on %s (data=%s images=%s)", addr, cfg.DataDir, cfg.ImagesDir)
+	// When TLS is configured, default to port 443 instead of 8080.
+	port := cfg.Port
+	if cfg.TLSCertFile != "" && port == "8080" {
+		port = "443"
+	}
+
+	addr := net.JoinHostPort("0.0.0.0", port)
+	scheme := "http"
+	if cfg.TLSCertFile != "" {
+		scheme = "https"
+	}
+	log.Printf("omnishelf listening on %s://%s (data=%s images=%s)", scheme, addr, cfg.DataDir, cfg.ImagesDir)
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: router,
@@ -185,8 +195,14 @@ func runServer() error {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 	}
-	if err := srv.ListenAndServe(); err != nil {
-		return fmt.Errorf("http server: %w", err)
+	if cfg.TLSCertFile != "" {
+		if err := srv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil {
+			return fmt.Errorf("https server: %w", err)
+		}
+	} else {
+		if err := srv.ListenAndServe(); err != nil {
+			return fmt.Errorf("http server: %w", err)
+		}
 	}
 	return nil
 }
