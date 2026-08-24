@@ -14,3 +14,4 @@ ui/node_modules/
 *.pem
 *-credentials.json
 *-serviceaccount.json
+pr/
