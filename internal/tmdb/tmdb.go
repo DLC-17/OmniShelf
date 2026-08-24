@@ -140,12 +140,14 @@ type Show struct {
 	Keywords     tvKeywords      `json:"keywords"` // from append_to_response=keywords
 }
 
-// TagNames returns the show's source-derived tag names (its TMDB keywords).
 func (s *Show) TagNames() []string {
 	out := make([]string, 0, len(s.Keywords.Results))
 	for _, k := range s.Keywords.Results {
 		if k.Name != "" {
 			out = append(out, k.Name)
+			if len(out) >= 5 {
+				break
+			}
 		}
 	}
 	return out
@@ -199,12 +201,14 @@ type Movie struct {
 	Keywords    movieKeywords `json:"keywords"` // from append_to_response=keywords
 }
 
-// TagNames returns the movie's source-derived tag names (its TMDB keywords).
 func (m *Movie) TagNames() []string {
 	out := make([]string, 0, len(m.Keywords.Keywords))
 	for _, k := range m.Keywords.Keywords {
 		if k.Name != "" {
 			out = append(out, k.Name)
+			if len(out) >= 5 {
+				break
+			}
 		}
 	}
 	return out

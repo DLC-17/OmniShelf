@@ -9,6 +9,7 @@ type User struct {
 	Username     string `gorm:"unique;not null"`
 	PasswordHash string `gorm:"not null"`
 	CreatedAt    time.Time
+	Theme        string   `gorm:"type:text;default:'dark-espresso'" json:"theme"`
 }
 
 // InviteCode is a single-use registration code.
@@ -29,6 +30,7 @@ type TrackingItem struct {
 	Status     string `gorm:"default:'WATCHING'"` // WATCHING, READING, PLAYING, LISTENING, COMPLETED, PLAN_TO, STOPPED
 	Progress   int    `gorm:"default:0"`          // page number (books); unused for TV
 	Rating     int    `gorm:"default:0"`          // user's 1–5 self-rating; 0 = unrated
+	Location   string `gorm:"default:''"`         // physical shelf location tag: 'Shelf A', 'Binder #1', etc.
 	UpdatedAt  time.Time
 }
 
@@ -38,6 +40,7 @@ type Show struct {
 	TMDBID       int    `gorm:"unique;not null"`
 	Title        string `gorm:"not null"`
 	PosterPath   string // relative path under images dir
+	Overview     string // TMDB synopsis; may be empty (backfilled by metadata refresh)
 	Status       string // TMDB status: Returning Series, Ended, ...
 	LastSyncedAt time.Time
 }
@@ -50,6 +53,7 @@ type Episode struct {
 	Number  int  `gorm:"not null;uniqueIndex:idx_show_ep"`
 	Title   string
 	AirDate *time.Time // nil = unannounced
+	Runtime int        // episode duration in minutes; 0 when unknown
 }
 
 // EpisodeWatch is per-user seen state.
@@ -62,13 +66,14 @@ type EpisodeWatch struct {
 
 // Book is the shared OpenLibrary metadata cache.
 type Book struct {
-	ID          uint   `gorm:"primaryKey"`
-	ISBN13      string `gorm:"unique;not null"`
-	Title       string `gorm:"not null"`
-	Authors     string // comma-joined
-	CoverPath   string
-	PageCount   int
-	Description string // OpenLibrary work summary; may be empty
+	ID            uint   `gorm:"primaryKey"`
+	ISBN13        string `gorm:"unique;not null"`
+	Title         string `gorm:"not null"`
+	Authors       string // comma-joined
+	CoverPath     string
+	PageCount     int
+	Description   string // OpenLibrary work summary; may be empty
+	PublishedDate string // "YYYY-MM-DD" or "YYYY" from OpenLibrary; "" when unknown
 }
 
 // Movie is the shared TMDB movie metadata cache (one row per movie, all
@@ -80,6 +85,7 @@ type Movie struct {
 	PosterPath   string // relative path under images dir
 	Overview     string
 	ReleaseDate  string // "YYYY-MM-DD" as returned by TMDB
+	Runtime      int    // duration in minutes; 0 when unknown
 	LastSyncedAt time.Time
 }
 
@@ -96,12 +102,16 @@ type Movie struct {
 type Game struct {
 	ID          uint   `gorm:"primaryKey"`
 	IGDBID      int    // canonical identity; unique among rows where igdb_id <> 0
+	GOGID       string // GOG slug/ID for DRM-free library sync; "" when not from GOG
 	Barcode     string // optional scanned UPC/EAN; "" for name-search / GOG games
 	Title       string `gorm:"not null"`
 	Platform    string
 	CoverPath   string
 	Description string // IGDB summary; may be empty
 	ReleaseDate string // "YYYY-MM-DD" from IGDB first_release_date; "" when unknown
+	Developer   string // primary developer studio; "" when unknown
+	Publisher   string // primary publisher; "" when unknown
+	Runtime     int    // completion time in minutes; 0 when unknown
 }
 
 // Tag is a source-derived keyword/genre, shared across every media item that
@@ -165,6 +175,7 @@ type Album struct {
 	Barcode       string // scanned UPC/EAN (Discogs only); may be empty
 	DiscogsID     int
 	MusicBrainzID string
+	ReleaseDate   string // "YYYY-MM-DD" from Discogs/MusicBrainz; "" when unknown
 }
 
 // Card is the shared trading-card metadata cache (one row per card printing,
@@ -241,6 +252,150 @@ type SyncLog struct {
 	Errors    string // JSON array of per-show failures
 }
 
+// Universal emotional sentiment tags for diary logs across all media types.
+const (
+	SentimentMindBlown        = "MIND_BLOWN"
+	SentimentCozy             = "COZY"
+	SentimentTearJerker       = "TEAR_JERKER"
+	SentimentInstantClassic   = "INSTANT_CLASSIC"
+	SentimentThoughtProvoking = "THOUGHT_PROVOKING"
+)
+
+// UniversalSentiments lists the standard sentiment tags.
+var UniversalSentiments = []string{
+	SentimentMindBlown,
+	SentimentCozy,
+	SentimentTearJerker,
+	SentimentInstantClassic,
+	SentimentThoughtProvoking,
+}
+
+// Note is a media-type-agnostic journal entry or emotional reaction a user
+// attaches to any tracked item. It supersedes the book-only BookNote model
+// (which is preserved for backward compatibility and existing data). Notes are
+// per-user and scoped by UserID + ItemID (the TrackingItem). MediaType mirrors
+// TrackingItem.Type so queries can scope to a single media without joining.
+// The optional Sentiment field captures an immediate emotional reaction
+// (e.g. "MIND_BLOWN", "COZY", "TEAR_JERKER", "INSTANT_CLASSIC", "THOUGHT_PROVOKING")
+// logged after marking media complete or during a re-watch / re-read.
+type Note struct {
+	ID          uint       `gorm:"primaryKey"`
+	UserID      uint       `gorm:"not null;index:idx_note_user_item_type"`
+	ItemID      uint       `gorm:"not null;index:idx_note_user_item_type"` // TrackingItem.ID
+	MediaType   string     `gorm:"type:varchar(10);not null;index:idx_note_user_item_type"`
+	Body        string     `gorm:"not null"`
+	Sentiment   string     // optional emotional tag: "MIND_BLOWN", "COZY", "TEAR_JERKER", etc.
+	IsRewatch   bool       `gorm:"default:false"` // re-watch, re-read, re-play, or re-listen completion log
+	CompletedAt *time.Time // timestamp when the completion / re-watch occurred
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+// UserCollection is a user-created cross-media collection (e.g. "Cozy Sci-Fi",
+// "Halloween Watchlist"). Unlike source-derived Tags, collections are entirely
+// user-owned and can span any media type. A collection can optionally be shared
+// externally via a ShareToken.
+type UserCollection struct {
+	ID        uint   `gorm:"primaryKey"`
+	UserID    uint   `gorm:"not null;index:idx_collection_user"`
+	Name      string `gorm:"not null"`
+	Slug      string `gorm:"not null;uniqueIndex:idx_collection_user_slug"` // URL-safe identifier
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// CollectionItem links a TrackingItem to a UserCollection. One item can belong
+// to many collections; one collection can hold many items across media types.
+type CollectionItem struct {
+	ID           uint `gorm:"primaryKey"`
+	CollectionID uint `gorm:"not null;uniqueIndex:idx_coll_item;index"`
+	ItemID       uint `gorm:"not null;uniqueIndex:idx_coll_item"` // TrackingItem.ID
+	AddedAt      time.Time
+}
+
+// CardPriceHistory records periodic market price snapshots for a trading card,
+// enabling a historical price delta line graph on card detail pages. Snapshots
+// are taken by a scheduled job that re-queries pricing APIs.
+type CardPriceHistory struct {
+	ID         uint    `gorm:"primaryKey"`
+	CardID     uint    `gorm:"not null;index:idx_card_price_date"`
+	Price      float64 `gorm:"not null"`
+	SnapshotAt time.Time `gorm:"not null;index:idx_card_price_date"`
+}
+
+// MediaRelation links two media cache rows as related entries within the same
+// franchise/series or across adaptations (e.g. a movie adaptation linked to its
+// source book, or games within the same series). Both sides reference shared
+// cache rows by type + primary key. RelationType describes the nature of the
+// link ("sequel", "prequel", "adaptation", "same_series", "similar").
+type MediaRelation struct {
+	ID            uint   `gorm:"primaryKey"`
+	SourceType    string `gorm:"type:varchar(10);not null;uniqueIndex:idx_relation"`
+	SourceID      uint   `gorm:"not null;uniqueIndex:idx_relation"`
+	TargetType    string `gorm:"type:varchar(10);not null;uniqueIndex:idx_relation"`
+	TargetID      uint   `gorm:"not null;uniqueIndex:idx_relation"`
+	RelationType  string `gorm:"not null"` // "sequel", "prequel", "adaptation", "same_series", "similar"
+}
+
+// Badge is a permanent achievement awarded for franchise completion or
+// milestones (e.g. completing all games in a series). Badges are defined by
+// the system, not user-created.
+type Badge struct {
+	ID          uint   `gorm:"primaryKey"`
+	Slug        string `gorm:"unique;not null"` // e.g. "zelda-completionist"
+	Name        string `gorm:"not null"`        // e.g. "Zelda Completionist"
+	Description string
+	IconPath    string // relative path under images dir; "" = default icon
+}
+
+// UserBadge records that a user earned a Badge, with the timestamp of when
+// the badge criteria were met.
+type UserBadge struct {
+	ID       uint `gorm:"primaryKey"`
+	UserID   uint `gorm:"not null;uniqueIndex:idx_user_badge"`
+	BadgeID  uint `gorm:"not null;uniqueIndex:idx_user_badge"`
+	EarnedAt time.Time
+}
+
+// ShareToken is a crypto-random token that grants read-only public access to a
+// specific UserCollection without authentication. Tokens can be revoked by
+// deletion. The token is long enough (32 bytes, hex-encoded = 64 chars) to
+// resist enumeration.
+type ShareToken struct {
+	ID           uint   `gorm:"primaryKey"`
+	UserID       uint   `gorm:"not null;index"`
+	CollectionID uint   `gorm:"not null;index"`
+	Token        string `gorm:"unique;not null"` // 64-char hex string
+	CreatedAt    time.Time
+}
+
+
+// LocalFileMapping links a file detected on the local NAS filesystem to a
+// shared metadata cache row. The scanner periodically traverses configured
+// directories and matches filenames/paths to known titles. This lets users
+// see which media they physically hold on their drives.
+type LocalFileMapping struct {
+	ID        uint   `gorm:"primaryKey"`
+	MediaType string `gorm:"type:varchar(10);not null;uniqueIndex:idx_local_file"`
+	MediaID   uint   `gorm:"not null;uniqueIndex:idx_local_file"`
+	FilePath  string `gorm:"not null;uniqueIndex:idx_local_file"` // absolute path on the NAS
+	FileSize  int64  // bytes; 0 = unknown
+	ScannedAt time.Time
+}
+
+// UserGOGAccount stores the authenticated GOG OAuth2 session and sync state for a user.
+type UserGOGAccount struct {
+	ID           uint       `gorm:"primaryKey"`
+	UserID       uint       `gorm:"uniqueIndex;not null"`
+	GOGUsername  string
+	AccessToken  string     `gorm:"not null"`
+	RefreshToken string
+	ExpiresAt    *time.Time
+	LastSyncedAt *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
 // All returns every model for AutoMigrate, in dependency order.
 func All() []any {
 	return []any{
@@ -252,10 +407,12 @@ func All() []any {
 		&EpisodeWatch{},
 		&Book{},
 		&BookNote{},
+		&Note{},
 		&Game{},
 		&Movie{},
 		&Album{},
 		&Card{},
+		&CardPriceHistory{},
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},
@@ -263,5 +420,13 @@ func All() []any {
 		&Tag{},
 		&MediaTag{},
 		&OwnershipFormat{},
+		&UserCollection{},
+		&CollectionItem{},
+		&MediaRelation{},
+		&Badge{},
+		&UserBadge{},
+		&ShareToken{},
+		&LocalFileMapping{},
+		&UserGOGAccount{},
 	}
 }

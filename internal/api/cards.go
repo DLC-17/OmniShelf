@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +36,8 @@ func RegisterCardRoutes(grp *gin.RouterGroup, svc *cards.Service) {
 	h := &cardsHandler{svc: svc}
 	grp.POST("/cards/scan", h.scan)
 	grp.POST("/cards/add", h.add)
+	grp.GET("/cards/portfolio-value", h.portfolioValue)
+	grp.GET("/cards/:id/price-history", h.priceHistory)
 }
 
 // cardScanResponse is the JSON shape of a successful scan: the identified
@@ -221,5 +224,51 @@ func (h *cardsHandler) add(c *gin.Context) {
 			"card": toCardResponse(card),
 			"item": toItemResponse(item),
 		})
+	}
+}
+
+type priceHistoryResponse struct {
+	ID         uint      `json:"id"`
+	CardID     uint      `json:"cardId"`
+	Price      float64   `json:"price"`
+	SnapshotAt time.Time `json:"snapshotAt"`
+}
+
+// portfolioValue handles GET /api/cards/portfolio-value — total portfolio
+// market valuation and breakdown across tracked cards for the current user.
+func (h *cardsHandler) portfolioValue(c *gin.Context) {
+	userID := CurrentUserID(c)
+	res, err := h.svc.GetPortfolioValue(c.Request.Context(), userID)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "calculating portfolio value failed")
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// priceHistory handles GET /api/cards/:id/price-history — chronological price
+// snapshots for a card (identified by Card ID or TrackingItem ID).
+func (h *cardsHandler) priceHistory(c *gin.Context) {
+	id, ok := uintParam(c, "id")
+	if !ok {
+		return
+	}
+	_, history, err := h.svc.GetPriceHistory(c.Request.Context(), id)
+	switch {
+	case errors.Is(err, cards.ErrCardNotFound):
+		Error(c, http.StatusNotFound, CodeCardNotFound, "card not found")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "fetching price history failed")
+	default:
+		out := make([]priceHistoryResponse, 0, len(history))
+		for _, p := range history {
+			out = append(out, priceHistoryResponse{
+				ID:         p.ID,
+				CardID:     p.CardID,
+				Price:      p.Price,
+				SnapshotAt: p.SnapshotAt,
+			})
+		}
+		c.JSON(http.StatusOK, out)
 	}
 }

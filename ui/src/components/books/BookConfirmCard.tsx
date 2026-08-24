@@ -11,7 +11,7 @@ interface BookConfirmCardProps {
 
 const STATUS_LABELS: Record<BookStatus, string> = {
   READING: 'Reading',
-  PLAN_TO: 'Plan to read',
+  PLAN_TO: 'Not started',
   COMPLETED: 'Completed',
 }
 

@@ -1,8 +1,8 @@
-// pages/Scan.tsx
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
-import { scanBook } from '../api/books'
 import type { Book } from '../api/books'
+import { scanBook } from '../api/books'
 import { isSecureContext } from '../lib/secureContext'
 import { isMobileDevice } from '../lib/device'
 import { bookScanTarget, gameScanTarget } from '../lib/scanTargets'
@@ -40,9 +40,19 @@ export function GameScan() {
 
 export default function Scan() {
   const secure = isSecureContext()
-
-  const [scanMedia, setScanMedia] = useState<ScanMedia>('book')
+  const [searchParams] = useSearchParams()
+  const initialMedia = searchParams.get('media') as ScanMedia | null
+  const [scanMedia, setScanMedia] = useState<ScanMedia>(
+    initialMedia && ['book', 'game', 'music', 'card'].includes(initialMedia) ? initialMedia : 'book',
+  )
   const [mode, setMode] = useState<ScanMode>('camera')
+
+  useEffect(() => {
+    const mediaParam = searchParams.get('media') as ScanMedia | null
+    if (mediaParam && ['book', 'game', 'music', 'card'].includes(mediaParam) && mediaParam !== scanMedia) {
+      setScanMedia(mediaParam)
+    }
+  }, [searchParams, scanMedia])
   
   const [book, setBook] = useState<Book | null>(null)
   const [looking, setLooking] = useState(false)

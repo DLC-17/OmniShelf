@@ -19,6 +19,7 @@ interface AddFeedback {
 export default function MusicSearch() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [collapsed, setCollapsed] = useState(false)
   const [feedback, setFeedback] = useState<Record<string, AddFeedback>>({})
 
   const search = useMusicSearch(query)
@@ -28,6 +29,7 @@ export default function MusicSearch() {
     event.preventDefault()
     setQuery(input.trim())
     setFeedback({})
+    setCollapsed(false) // automatically expand on a new search
   }
 
   const handleAdd = (mbid: string) => {
@@ -63,53 +65,75 @@ export default function MusicSearch() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{
+            padding: '0 0.5rem',
+            fontSize: '0.9rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s ease',
+          }}
+          onClick={() => setCollapsed((prev) => !prev)}
+          aria-label={collapsed ? 'Expand search results' : 'Collapse search results'}
+          title={collapsed ? 'Expand search results' : 'Collapse search results'}
+        >
+          ▲
+        </button>
         <button type="submit" className="btn-primary" disabled={input.trim() === ''}>
           Search
         </button>
       </form>
 
-      {search.isFetching && <p className="muted">Searching…</p>}
-      {search.isError && (
-        <p role="alert" className="alert">
-          {search.error instanceof ApiError && search.error.code === 'upstream_error'
-            ? 'MusicBrainz unreachable, try again'
-            : 'Search failed. Try again.'}
-        </p>
-      )}
-      {search.data !== undefined && search.data.length === 0 && (
-        <p>No albums found for “{query}”.</p>
-      )}
-      {search.data !== undefined && search.data.length > 0 && (
-        <ul className="list">
-          {search.data.map((result: AlbumSearchResult) => {
-            const fb = feedback[result.mbid]
-            return (
-              <li key={result.mbid} className="card card-row">
-                <SearchCover src={`/api/covers/music/${result.mbid}`} title={result.title} />
-                <div className="grow">
-                  <strong>{result.title}</strong>
-                  {result.year > 0 && <span className="muted"> ({result.year})</span>}
-                  {result.artist !== '' && <p className="meta">{result.artist}</p>}
-                </div>
-                {fb !== undefined ? (
-                  <span role={fb.isError ? 'alert' : 'status'} className={fb.isError ? 'alert' : 'muted'}>
-                    {fb.text}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-confirm"
-                    onClick={() => handleAdd(result.mbid)}
-                    disabled={addAlbum.isPending}
-                    aria-label={`Add ${result.title}`}
-                  >
-                    Add
-                  </button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+      {!collapsed && (
+        <>
+          {search.isFetching && <p className="muted">Searching…</p>}
+          {search.isError && (
+            <p role="alert" className="alert">
+              {search.error instanceof ApiError && search.error.code === 'upstream_error'
+                ? 'MusicBrainz unreachable, try again'
+                : 'Search failed. Try again.'}
+            </p>
+          )}
+          {search.data !== undefined && search.data.length === 0 && (
+            <p>No albums found for “{query}”.</p>
+          )}
+          {search.data !== undefined && search.data.length > 0 && (
+            <ul className="list">
+              {search.data.map((result: AlbumSearchResult) => {
+                const fb = feedback[result.mbid]
+                return (
+                  <li key={result.mbid} className="card card-row">
+                    <SearchCover src={`/api/covers/music/${result.mbid}`} title={result.title} />
+                    <div className="grow">
+                      <strong>{result.title}</strong>
+                      {result.year > 0 && <span className="muted"> ({result.year})</span>}
+                      {result.artist !== '' && <p className="meta">{result.artist}</p>}
+                    </div>
+                    {fb !== undefined ? (
+                      <span role={fb.isError ? 'alert' : 'status'} className={fb.isError ? 'alert' : 'muted'}>
+                        {fb.text}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-confirm"
+                        onClick={() => handleAdd(result.mbid)}
+                        disabled={addAlbum.isPending}
+                        aria-label={`Add ${result.title}`}
+                      >
+                        Add
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
       )}
     </section>
   )

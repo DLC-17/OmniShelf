@@ -14,7 +14,7 @@ export const bookScanTarget: ScanTarget<BookStatus> = {
   placeholder: 'Scan or type an ISBN, then Enter',
   statuses: [
     { value: 'READING', label: 'Reading' },
-    { value: 'PLAN_TO', label: 'Plan to read' },
+    { value: 'PLAN_TO', label: 'Not started' },
     { value: 'COMPLETED', label: 'Completed' },
   ],
   defaultStatus: 'READING',
@@ -33,7 +33,7 @@ export const gameScanTarget: ScanTarget<GameStatus> = {
   placeholder: 'Scan or type a barcode, then Enter',
   statuses: [
     { value: 'PLAYING', label: 'Playing' },
-    { value: 'PLAN_TO', label: 'Plan to play' },
+    { value: 'PLAN_TO', label: 'Not started' },
     { value: 'COMPLETED', label: 'Completed' },
     { value: 'STOPPED', label: 'Stopped playing' },
   ],
@@ -53,7 +53,7 @@ export const musicScanTarget: ScanTarget<MusicStatus> = {
   placeholder: 'Scan or type a barcode, then Enter',
   statuses: [
     { value: 'LISTENING', label: 'Listening' },
-    { value: 'PLAN_TO', label: 'Plan to listen' },
+    { value: 'PLAN_TO', label: 'Not started' },
     { value: 'COMPLETED', label: 'Listened' },
     { value: 'STOPPED', label: 'Set aside' },
   ],

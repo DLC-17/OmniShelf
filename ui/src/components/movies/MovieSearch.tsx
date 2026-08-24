@@ -54,6 +54,7 @@ function ResultPoster({ posterPath, title }: { posterPath: string; title: string
 export default function MovieSearch() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [collapsed, setCollapsed] = useState(false)
   const [feedback, setFeedback] = useState<Record<number, AddFeedback>>({})
 
   const search = useMovieSearch(query)
@@ -63,6 +64,7 @@ export default function MovieSearch() {
     event.preventDefault()
     setQuery(input.trim())
     setFeedback({})
+    setCollapsed(false) // automatically expand on a new search
   }
 
   const handleAdd = (tmdbId: number) => {
@@ -95,55 +97,77 @@ export default function MovieSearch() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{
+            padding: '0 0.5rem',
+            fontSize: '0.9rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s ease',
+          }}
+          onClick={() => setCollapsed((prev) => !prev)}
+          aria-label={collapsed ? 'Expand search results' : 'Collapse search results'}
+          title={collapsed ? 'Expand search results' : 'Collapse search results'}
+        >
+          ▲
+        </button>
         <button type="submit" className="btn-primary" disabled={input.trim() === ''}>
           Search
         </button>
       </form>
 
-      {search.isFetching && <p className="muted">Searching…</p>}
-      {search.isError && (
-        <p role="alert" className="alert">
-          {search.error instanceof ApiError && search.error.code === 'tmdb_unavailable'
-            ? 'TMDB unreachable, try again'
-            : 'Search failed. Try again.'}
-        </p>
-      )}
-      {search.data !== undefined && search.data.length === 0 && (
-        <p>No movies found for “{query}”.</p>
-      )}
-      {search.data !== undefined && search.data.length > 0 && (
-        <ul className="list">
-          {search.data.map((result) => {
-            const fb = feedback[result.id]
-            return (
-              <li key={result.id} className="card card-row">
-                <ResultPoster posterPath={result.posterPath} title={result.title} />
-                <div className="grow">
-                  <strong>{result.title}</strong>
-                  {releaseYear(result) !== '' && <span className="muted"> ({releaseYear(result)})</span>}
-                  {result.overview !== '' && (
-                    <p className="meta search-overview">{result.overview}</p>
-                  )}
-                </div>
-                {fb !== undefined ? (
-                  <span role={fb.isError ? 'alert' : 'status'} className={fb.isError ? 'alert' : 'muted'}>
-                    {fb.text}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    className="btn-confirm"
-                    onClick={() => handleAdd(result.id)}
-                    disabled={addMovie.isPending}
-                    aria-label={`Add ${result.title}`}
-                  >
-                    Add
-                  </button>
-                )}
-              </li>
-            )
-          })}
-        </ul>
+      {!collapsed && (
+        <>
+          {search.isFetching && <p className="muted">Searching…</p>}
+          {search.isError && (
+            <p role="alert" className="alert">
+              {search.error instanceof ApiError && search.error.code === 'tmdb_unavailable'
+                ? 'TMDB unreachable, try again'
+                : 'Search failed. Try again.'}
+            </p>
+          )}
+          {search.data !== undefined && search.data.length === 0 && (
+            <p>No movies found for “{query}”.</p>
+          )}
+          {search.data !== undefined && search.data.length > 0 && (
+            <ul className="list">
+              {search.data.map((result) => {
+                const fb = feedback[result.id]
+                return (
+                  <li key={result.id} className="card card-row">
+                    <ResultPoster posterPath={result.posterPath} title={result.title} />
+                    <div className="grow">
+                      <strong>{result.title}</strong>
+                      {releaseYear(result) !== '' && <span className="muted"> ({releaseYear(result)})</span>}
+                      {result.overview !== '' && (
+                        <p className="meta search-overview">{result.overview}</p>
+                      )}
+                    </div>
+                    {fb !== undefined ? (
+                      <span role={fb.isError ? 'alert' : 'status'} className={fb.isError ? 'alert' : 'muted'}>
+                        {fb.text}
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-confirm"
+                        onClick={() => handleAdd(result.id)}
+                        disabled={addMovie.isPending}
+                        aria-label={`Add ${result.title}`}
+                      >
+                        Add
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
       )}
     </section>
   )

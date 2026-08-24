@@ -26,9 +26,12 @@ ui/dist/*
 
 # Secrets & Credentials
 *.pem
+*.crt
 *.key
 *-credentials.json
 *-serviceaccount.json
+credentials/
+/credentials/
 
 # Local Container Volumes
 .run/
@@ -52,3 +55,4 @@ UP_TO_SPEED*
 # Editor / OS Noise
 .DS_Store
 Thumbs.db
+

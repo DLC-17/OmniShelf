@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 )
 
 // minJWTSecretLen is the minimum accepted OMNISHELF_JWT_SECRET length; a
@@ -64,6 +66,21 @@ type Config struct {
 	// TLSKeyFile is the path to the PEM-encoded private key matching
 	// TLSCertFile (TLS_KEY_FILE). Both must be set to enable HTTPS.
 	TLSKeyFile string
+	// GOGAccessToken authenticates GOG library sync for DRM-free game
+	// imports (GOG_ACCESS_TOKEN). Optional: when unset the games module
+	// skips GOG sync.
+	GOGAccessToken string
+	// ScanDirs is a comma-separated list of local NAS directories to scan
+	// for DRM-free media files (OMNISHELF_SCAN_DIRS). Optional: when unset
+	// the NAS file scanner is disabled.
+	ScanDirs []string
+	// ScanIntervalHours is how often (in hours) the NAS file scanner runs
+	// (OMNISHELF_SCAN_INTERVAL_HOURS, default 24).
+	ScanIntervalHours int
+	// SeerrURL is the base URL of the Seerr instance (SEERR_URL). Optional.
+	SeerrURL string
+	// SeerrAPIKey is the API key for the Seerr instance (SEERR_API_KEY). Optional.
+	SeerrAPIKey string
 }
 
 // Load reads configuration from the environment and validates it.
@@ -91,6 +108,13 @@ func Load() (*Config, error) {
 
 		TLSCertFile: os.Getenv("TLS_CERT_FILE"),
 		TLSKeyFile:  os.Getenv("TLS_KEY_FILE"),
+
+		GOGAccessToken:    os.Getenv("GOG_ACCESS_TOKEN"),
+		ScanDirs:          parseScanDirs(os.Getenv("OMNISHELF_SCAN_DIRS")),
+		ScanIntervalHours: parseScanInterval(os.Getenv("OMNISHELF_SCAN_INTERVAL_HOURS")),
+
+		SeerrURL:    os.Getenv("SEERR_URL"),
+		SeerrAPIKey: os.Getenv("SEERR_API_KEY"),
 	}
 
 	if cfg.JWTSecret == "" {
@@ -156,4 +180,36 @@ func ensureWritableDir(path string) error {
 		return fmt.Errorf("removing write probe: %w", err)
 	}
 	return nil
+}
+
+// parseScanDirs splits a comma-separated OMNISHELF_SCAN_DIRS value into a
+// trimmed slice, discarding empty entries.
+func parseScanDirs(raw string) []string {
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// parseScanInterval parses OMNISHELF_SCAN_INTERVAL_HOURS, defaulting to 24.
+func parseScanInterval(raw string) int {
+	if raw == "" {
+		return 24
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 24
+	}
+	return n
 }

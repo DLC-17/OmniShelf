@@ -15,11 +15,13 @@ import type { ItemStatus, LibraryItem } from '../../api/library'
 import { formatUsd } from '../../lib/currency'
 import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
 import { useDeleteItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
+import { useRequestSeerrMedia, useSeerrConfigured, useSeerrStatus } from '../../hooks/useSeerr'
 import OwnershipSelect from '../common/OwnershipSelect'
 import EpisodeList from '../tv/EpisodeList'
 import Poster from '../tv/Poster'
 import BookNotes from './BookNotes'
 import RatingStars from './RatingStars'
+import PriceSparkline from '../cards/PriceSparkline'
 
 interface LibraryDetailProps {
   item: LibraryItem
@@ -28,9 +30,9 @@ interface LibraryDetailProps {
 
 /**
  * Expanded detail for one library item, shown in a modal when a cover is
- * clicked. Books surface their cover, author, length and summary; every item
- * offers a self-rating, an inline status change, book page progress, and a
- * confirm-gated delete.
+ * clicked. Media surfaces their cover, metadata and summary; every item
+ * offers a self-rating, an inline status change, shelf location tagging,
+ * universal journaling with emotional reaction chips, and a confirm-gated delete.
  */
 export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const update = useUpdateItem()
@@ -42,6 +44,7 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const [confirming, setConfirming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [progressDraft, setProgressDraft] = useState(String(item.progress))
+  const [locationDraft, setLocationDraft] = useState(item.location ?? '')
   // Locally-held ownership so toggles reflect immediately; reconciled to the
   // server's canonical set on success and rolled back on error.
   const [ownership, setOwnership] = useState<string[]>(item.ownership)
@@ -50,10 +53,21 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   const [artwork, setArtwork] = useState(item.artworkPath)
   const artBusy = refreshArt.isPending || uploadArt.isPending
 
-  const isBook = item.type === 'BOOK'
-  const isGame = item.type === 'GAME'
+  const { data: seerrConfigured } = useSeerrConfigured()
   const isTV = item.type === 'TV'
   const isMovie = item.type === 'MOVIE'
+  const tmdbId = Number.parseInt(item.externalId, 10)
+  const isSeerrEligible = (isTV || isMovie) && seerrConfigured && !Number.isNaN(tmdbId)
+  const seerrType = isTV ? 'tv' : 'movie'
+  const { data: seerrStatus } = useSeerrStatus(tmdbId, seerrType, !!isSeerrEligible)
+  const requestMedia = useRequestSeerrMedia()
+
+  const handleRequestMedia = () => {
+    requestMedia.mutate({ tmdbId, type: seerrType })
+  }
+
+  const isBook = item.type === 'BOOK'
+  const isGame = item.type === 'GAME'
   const isMusic = item.type === 'MUSIC'
   const isCard = item.type === 'CARD'
   const statuses = isBook
@@ -73,6 +87,7 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
     progress?: number
     rating?: number
     ownership?: string[]
+    location?: string
   }) => {
     setError(null)
     update.mutate(
@@ -89,6 +104,13 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
       return
     }
     if (parsed !== item.progress) runUpdate({ progress: parsed })
+  }
+
+  const commitLocation = () => {
+    const trimmed = locationDraft.trim()
+    if (trimmed !== (item.location ?? '')) {
+      runUpdate({ location: trimmed })
+    }
   }
 
   const handleOwnership = (next: string[]) => {
@@ -235,15 +257,65 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
                 disabled={update.isPending}
                 onChange={(e) => runUpdate({ status: e.target.value as ItemStatus })}
               >
-                {statuses.map((s) => (
-                  // TV COMPLETED is system-derived from watched episodes, so it
-                  // shows when reached but can't be chosen manually (only STOPPED is).
-                  <option key={s} value={s} disabled={isTV && s === 'COMPLETED'}>
-                    {s}
-                  </option>
-                ))}
+                {statuses.map((s) => {
+                  let label: string = s
+                  if (s === 'PLAN_TO') label = 'Not started'
+                  else if (s === 'WATCHING') label = 'Watching'
+                  else if (s === 'READING') label = 'Reading'
+                  else if (s === 'PLAYING') label = 'Playing'
+                  else if (s === 'LISTENING') label = 'Listening'
+                  else if (s === 'COMPLETED') label = 'Completed'
+                  else if (s === 'STOPPED') {
+                    if (item.type === 'TV' || item.type === 'MOVIE') label = 'Stopped watching'
+                    else if (item.type === 'BOOK') label = 'Stopped reading'
+                    else if (item.type === 'GAME') label = 'Stopped playing'
+                    else if (item.type === 'MUSIC') label = 'Set aside'
+                    else label = 'Stopped'
+                  }
+                  return (
+                    <option key={s} value={s} disabled={isTV && s === 'COMPLETED'}>
+                      {label}
+                    </option>
+                  )
+                })}
               </select>
             </label>
+
+            {/* Shelf Location Tag Input */}
+            <label className="field" style={{ marginTop: '0.5rem' }}>
+              <span>Shelf Location</span>
+              <input
+                type="text"
+                placeholder="e.g. Living Room Shelf A"
+                aria-label={`Shelf Location for ${item.title}`}
+                value={locationDraft}
+                disabled={update.isPending}
+                onChange={(e) => setLocationDraft(e.target.value)}
+                onBlur={commitLocation}
+                style={{ flex: 1, minWidth: '10rem' }}
+              />
+            </label>
+
+            {isSeerrEligible && (
+              <div className="field" style={{ marginTop: '0.5rem' }}>
+                <span>Seerr</span>
+                {seerrStatus?.available ? (
+                  <span className="badge">Available</span>
+                ) : seerrStatus?.requested ? (
+                  <span className="badge">Requested</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    onClick={handleRequestMedia}
+                    disabled={requestMedia.isPending || !seerrStatus}
+                    style={{ padding: '0.25rem 0.5rem', fontSize: '0.85rem' }}
+                  >
+                    {requestMedia.isPending ? 'Requesting…' : 'Request Media'}
+                  </button>
+                )}
+              </div>
+            )}
 
             {isBook && (
               <label className="field" style={{ marginTop: '0.5rem' }}>
@@ -274,6 +346,13 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
             )}
           </div>
         </div>
+
+        {isCard && item.price > 0 && (
+          <div className="detail-summary">
+            <h3>Price History</h3>
+            <PriceSparkline currentPrice={item.price} width={450} height={90} />
+          </div>
+        )}
 
         {(isBook || isGame || isMovie) && item.description !== '' && (
           <div className="detail-summary">
@@ -318,7 +397,8 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
           </div>
         )}
 
-        {isBook && <BookNotes itemId={item.id} />}
+        {/* Universal Cross-Media Journal & Sentiment Reactions */}
+        <BookNotes itemId={item.id} />
 
         {error !== null && (
           <p role="alert" className="alert">

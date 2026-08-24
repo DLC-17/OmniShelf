@@ -15,7 +15,7 @@ const STATUS_LABELS: Record<LibraryStatusFilter, string> = {
   WATCHING: 'Watching',
   READING: 'Reading',
   COMPLETED: 'Completed',
-  PLAN_TO: 'Plan to',
+  PLAN_TO: 'Not started',
 }
 
 /**

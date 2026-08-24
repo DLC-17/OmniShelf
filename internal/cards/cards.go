@@ -432,7 +432,125 @@ func (s *Service) Add(ctx context.Context, userID uint, res ScanResult, status s
 		}
 		return nil, nil, fmt.Errorf("creating tracking item: %w", err)
 	}
+	if card.Price > 0 {
+		_ = s.RecordPriceSnapshot(ctx, card.ID, card.Price)
+	}
+
 	return &card, &item, nil
+}
+
+// RecordPriceSnapshot records a weekly historical market price snapshot for a card.
+// Only records at most once per week per card, updating the current week's snapshot
+// if multiple checks occur within 7 days.
+func (s *Service) RecordPriceSnapshot(ctx context.Context, cardID uint, price float64) error {
+	if price <= 0 {
+		return nil
+	}
+	var latest models.CardPriceHistory
+	err := s.db.WithContext(ctx).Where("card_id = ?", cardID).Order("snapshot_at desc").First(&latest).Error
+	if err == nil {
+		if time.Since(latest.SnapshotAt) < 7*24*time.Hour {
+			latest.Price = price
+			latest.SnapshotAt = time.Now()
+			return s.db.WithContext(ctx).Save(&latest).Error
+		}
+	}
+	history := models.CardPriceHistory{
+		CardID:     cardID,
+		Price:      price,
+		SnapshotAt: time.Now(),
+	}
+	return s.db.WithContext(ctx).Create(&history).Error
+}
+
+// GetPriceHistory retrieves the price history snapshots for a card, looking up
+// by either Card.ID or TrackingItem.ID.
+func (s *Service) GetPriceHistory(ctx context.Context, id uint) (*models.Card, []models.CardPriceHistory, error) {
+	var card models.Card
+	err := s.db.WithContext(ctx).First(&card, id).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Try looking up by TrackingItem.ID
+		var item models.TrackingItem
+		if itemErr := s.db.WithContext(ctx).Where("id = ? AND type = ?", id, TypeCard).First(&item).Error; itemErr == nil {
+			if cardErr := s.db.WithContext(ctx).Where("external_id = ?", item.ExternalID).First(&card).Error; cardErr != nil {
+				return nil, nil, ErrCardNotFound
+			}
+		} else {
+			return nil, nil, ErrCardNotFound
+		}
+	} else if err != nil {
+		return nil, nil, fmt.Errorf("looking up card %d: %w", id, err)
+	}
+
+	var history []models.CardPriceHistory
+	if err := s.db.WithContext(ctx).Where("card_id = ?", card.ID).Order("snapshot_at asc, id asc").Find(&history).Error; err != nil {
+		return nil, nil, fmt.Errorf("loading price history for card %d: %w", card.ID, err)
+	}
+
+	return &card, history, nil
+}
+
+// GamePortfolioBreakdown summarizes card count and total valuation per game.
+type GamePortfolioBreakdown struct {
+	Game       string  `json:"game"`
+	Count      int     `json:"count"`
+	TotalValue float64 `json:"totalValue"`
+}
+
+// PortfolioValueResult contains the aggregated valuation of a user's card collection.
+type PortfolioValueResult struct {
+	TotalValue float64                  `json:"totalValue"`
+	CardCount  int                      `json:"cardCount"`
+	ByGame     []GamePortfolioBreakdown `json:"byGame"`
+}
+
+// GetPortfolioValue computes the total market valuation and count of trading cards tracked by a user.
+func (s *Service) GetPortfolioValue(ctx context.Context, userID uint) (*PortfolioValueResult, error) {
+	type cardRow struct {
+		Game  string
+		Price float64
+	}
+	var rows []cardRow
+	err := s.db.WithContext(ctx).Table("tracking_items").
+		Select("cards.game, cards.price").
+		Joins("JOIN cards ON cards.external_id = tracking_items.external_id").
+		Where("tracking_items.user_id = ? AND tracking_items.type = ?", userID, TypeCard).
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("calculating portfolio value for user %d: %w", userID, err)
+	}
+
+	res := &PortfolioValueResult{
+		ByGame: make([]GamePortfolioBreakdown, 0),
+	}
+
+	gameStats := make(map[string]*GamePortfolioBreakdown)
+	for _, r := range rows {
+		res.TotalValue += r.Price
+		res.CardCount++
+
+		g := r.Game
+		if g == "" {
+			g = "OTHER"
+		}
+		if _, ok := gameStats[g]; !ok {
+			gameStats[g] = &GamePortfolioBreakdown{Game: g}
+		}
+		gameStats[g].Count++
+		gameStats[g].TotalValue += r.Price
+	}
+
+	for _, g := range []string{GamePokemon, GameYugioh} {
+		if stat, ok := gameStats[g]; ok {
+			res.ByGame = append(res.ByGame, *stat)
+			delete(gameStats, g)
+		}
+	}
+	for _, stat := range gameStats {
+		res.ByGame = append(res.ByGame, *stat)
+	}
+
+	return res, nil
 }
 
 // upsertCard creates the Card row or refreshes an existing one for the same

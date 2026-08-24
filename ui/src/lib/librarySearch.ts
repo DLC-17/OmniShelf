@@ -9,7 +9,7 @@ import {
 } from '../api/library'
 
 /** A single filterable facet of a library item. */
-export type FilterAspect = 'status' | 'author' | 'platform' | 'ownership' | 'tag' | 'artist'
+export type FilterAspect = 'status' | 'author' | 'platform' | 'ownership' | 'tag' | 'artist' | 'rating'
 
 /** Selected values keyed by aspect; an aspect is "active" once it has ≥1 value. */
 export type FilterState = Partial<Record<FilterAspect, string[]>>
@@ -78,15 +78,21 @@ export const ARTIST_ASPECT: AspectDef = {
   label: 'Artist',
   values: (i) => (i.artist ? [i.artist] : []),
 }
+export const RATING_ASPECT: AspectDef = {
+  aspect: 'rating',
+  label: 'Rating',
+  values: (i) => (i.rating > 0 ? [i.rating.toString()] : []),
+  optionLabel: (v) => `${v} Star${v === '1' ? '' : 's'}`,
+}
 
 /** Per-media aspects, in dropdown order. Aspects with no values auto-hide. */
 export const ASPECTS: Record<MediaType, AspectDef[]> = {
-  TV: [STATUS_ASPECT, TAG_ASPECT],
-  MOVIE: [STATUS_ASPECT, TAG_ASPECT],
-  BOOK: [STATUS_ASPECT, AUTHOR_ASPECT, TAG_ASPECT],
-  GAME: [STATUS_ASPECT, PLATFORM_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
-  MUSIC: [STATUS_ASPECT, ARTIST_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
-  CARD: [STATUS_ASPECT, TAG_ASPECT],
+  TV: [STATUS_ASPECT, RATING_ASPECT, TAG_ASPECT],
+  MOVIE: [STATUS_ASPECT, RATING_ASPECT, TAG_ASPECT],
+  BOOK: [STATUS_ASPECT, RATING_ASPECT, AUTHOR_ASPECT, TAG_ASPECT],
+  GAME: [STATUS_ASPECT, RATING_ASPECT, PLATFORM_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
+  MUSIC: [STATUS_ASPECT, RATING_ASPECT, ARTIST_ASPECT, OWNERSHIP_ASPECT, TAG_ASPECT],
+  CARD: [STATUS_ASPECT, RATING_ASPECT, TAG_ASPECT],
 }
 
 export function statusesFor(media: MediaType): ItemStatus[] {
@@ -114,6 +120,8 @@ export function deriveOptions(items: LibraryItem[], def: AspectDef, media: Media
   if (def.aspect === 'status') {
     const order = statusesFor(media)
     out.sort((a, b) => order.indexOf(a as ItemStatus) - order.indexOf(b as ItemStatus))
+  } else if (def.aspect === 'rating') {
+    out.sort((a, b) => parseInt(b, 10) - parseInt(a, 10)) // high to low
   } else {
     out.sort((a, b) => a.localeCompare(b))
   }

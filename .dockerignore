@@ -1,0 +1,16 @@
+.git/
+images/
+data/
+credentials/
+omnishelf_data/
+omnishlef_data/
+ui/node_modules/
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+*.key
+*.pem
+*-credentials.json
+*-serviceaccount.json

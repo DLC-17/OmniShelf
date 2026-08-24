@@ -28,15 +28,46 @@ export default function ScannerView({ onDetected, onCameraError }: ScannerViewPr
 
   useEffect(() => {
     const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, {
-      formatsToSupport: [Html5QrcodeSupportedFormats.EAN_13],
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+      ],
       verbose: false,
+      // Use the browser's native BarcodeDetector when available (Chromium);
+      // falls back to ZXing JS on Firefox / Safari automatically.
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true,
+      },
     })
     let detected = false
 
     scanner
       .start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 150 } },
+        {
+          fps: 10,
+          // Scale the decode region to the viewfinder so it works on both a
+          // narrow phone screen and a wide 16:9 webcam feed.  Floors ensure
+          // the box never collapses below a usable size on tiny viewports.
+          qrbox: (viewfinderWidth: number, viewfinderHeight: number) => ({
+            width: Math.max(250, Math.floor(viewfinderWidth * 0.7)),
+            height: Math.max(150, Math.floor(viewfinderHeight * 0.35)),
+          }),
+          // Skip the mirror-flip check — barcodes are always read from the
+          // rear camera (mobile) or a forward-facing webcam (desktop).
+          disableFlip: true,
+          // Ask for 720p and continuous autofocus; `ideal` and `advanced` are
+          // hints — phones/webcams that don't support them ignore gracefully.
+          // When videoConstraints is present the library uses it as-is for
+          // getUserMedia, so facingMode is repeated here.
+          videoConstraints: {
+            facingMode: 'environment',
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            advanced: [{ focusMode: 'continuous' } as MediaTrackConstraintSet],
+          },
+        },
         (decodedText) => {
           if (detected) return
           detected = true

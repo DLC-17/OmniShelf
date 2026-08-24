@@ -1,0 +1,13 @@
+services:
+  omnishelf:
+    build: .
+    container_name: omnishelf
+    ports:
+      - "${OMNISHELF_PORT:-8080}:${OMNISHELF_PORT:-8080}"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./images:/images
+      - ./credentials:/credentials:ro
+    restart: unless-stopped

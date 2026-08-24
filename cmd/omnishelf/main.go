@@ -31,6 +31,8 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
 	"github.com/davidlc1229/omnishelf/internal/pokemontcg"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
+	"github.com/davidlc1229/omnishelf/internal/scanner"
+	"github.com/davidlc1229/omnishelf/internal/seerr"
 	syncengine "github.com/davidlc1229/omnishelf/internal/sync"
 	"github.com/davidlc1229/omnishelf/internal/tmdb"
 	"github.com/davidlc1229/omnishelf/internal/tv"
@@ -44,8 +46,11 @@ func main() {
 		case "invite":
 			runInvite(os.Args[2:])
 			return
+		case "refresh":
+			runRefresh(os.Args[2:])
+			return
 		default:
-			log.Printf("unknown subcommand %q (available: invite)", os.Args[1])
+			log.Printf("unknown subcommand %q (available: invite, refresh)", os.Args[1])
 			os.Exit(1)
 		}
 	}
@@ -101,6 +106,7 @@ func runServer() error {
 	ygoprodeckClient := ygoprodeck.New()
 	pokemontcgClient := pokemontcg.New(cfg.PokemonTCGAPIKey)
 	imageStore := images.New(cfg.ImagesDir)
+	seerrClient := seerr.New(cfg)
 
 	// Unauthenticated liveness probe (Docker HEALTHCHECK / TrueNAS): reachable
 	// without a JWT, so it is attached to the bare engine, not the group below.
@@ -143,16 +149,31 @@ func runServer() error {
 	api.RegisterFeedRoutes(protected, gdb)
 	api.RegisterUpcomingRoutes(protected, gdb)
 	api.RegisterUserRoutes(protected, gdb)
+	api.RegisterThemeRoutes(protected, gdb)
+	api.RegisterCollectionRoutes(protected, gdb)
+	api.RegisterStatsRoutes(protected, gdb)
+	api.RegisterDiaryRoutes(protected, gdb)
+	api.RegisterSeerrRoutes(protected, seerrClient)
+	api.RegisterGOGRoutes(protected, gdb, gameSvc, cfg.GOGAccessToken)
+
+	// Inbound media server webhooks (Jellyfin, Emby, Plex)
+	api.RegisterWebhookRoutes(router, gdb, tvSvc, movieSvc, cfg)
 
 	// Nightly TMDB sync at 03:00.
 	engine := syncengine.New(gdb, tmdbClient, imageStore,
 		syncengine.WithReconcileWatching(tvSvc.ReconcileAllWatching),
 	)
-	scheduler := cron.New()
-	if err := engine.Schedule(scheduler); err != nil {
-		return fmt.Errorf("scheduling nightly sync: %w", err)
+	cronScheduler := cron.New()
+	if err := engine.Schedule(cronScheduler); err != nil {
+		log.Fatalf("failed to schedule TMDB sync: %v", err)
 	}
-	scheduler.Start()
+
+	nasScanner := scanner.New(gdb, cfg)
+	if err := nasScanner.Schedule(cronScheduler); err != nil {
+		log.Fatalf("failed to schedule NAS scanner: %v", err)
+	}
+
+	cronScheduler.Start()
 
 	// Cached artwork served from the images volume, gated behind JWT auth.
 	// Previously registered on the bare router (unauthenticated), which

@@ -11,8 +11,9 @@ import {
 import { setUnauthorizedHandler } from './api/client'
 import Layout from './components/Layout'
 import { useAuth } from './hooks/useAuth'
+import Cards from './pages/Cards'
+import Collections from './pages/Collections'
 import Discover from './pages/Discover'
-import Feed from './pages/Feed'
 import Import from './pages/Import'
 import Library from './pages/Library'
 import Login from './pages/Login'
@@ -80,10 +81,13 @@ export function AppRoutes() {
             <Route path="/" element={<UpNext />} />
             <Route path="/discover" element={<Discover />} />
             <Route path="/library" element={<Library />} />
+            <Route path="/cards" element={<Cards />} />
+            <Route path="/collections" element={<Collections />} />
             <Route path="/scan" element={<Scan />} />
-            <Route path="/feed" element={<Feed />} />
             <Route path="/import" element={<Import />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/profile" element={<Navigate to="/settings" replace />} />
+            <Route path="/stats" element={<Navigate to="/settings" replace />} />
             <Route path="/users/:id" element={<UserLibrary />} />
           </Route>
         </Route>

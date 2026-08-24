@@ -5,12 +5,17 @@ import './index.css'
 import App from './App'
 import { AuthProvider } from './hooks/useAuth'
 import { queryClient } from './lib/queryClient'
+import { ThemeProvider } from './theme/ThemeContext'
+
+// ThemeProvider handles theme initialization
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <App />
+        <ThemeProvider>
+          <App />
+        </ThemeProvider>
       </AuthProvider>
     </QueryClientProvider>
   </StrictMode>,

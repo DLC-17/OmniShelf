@@ -1,7 +1,10 @@
 package api
 
 import (
+	"bytes"
+	"encoding/csv"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,12 +22,13 @@ const codeUserNotFound = "user_not_found"
 
 type usersHandler struct{ db *gorm.DB }
 
-// RegisterUserRoutes attaches the read-only member endpoints to the
+// RegisterUserRoutes attaches the read-only member endpoints and export to the
 // JWT-protected /api group. Deliberately no mutating routes:
 // cross-user visibility is read-only.
 func RegisterUserRoutes(grp *gin.RouterGroup, gdb *gorm.DB) {
 	h := &usersHandler{db: gdb}
 	grp.GET("/users", h.list)
+	grp.GET("/users/export", h.export)
 	grp.GET("/users/:id/library", h.library)
 }
 
@@ -91,6 +95,72 @@ type userLibraryItem struct {
 	Status     string    `json:"status"`
 	Progress   int       `json:"progress"`
 	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// export handles GET /api/users/export?format=json|csv — downloads full library data for the current user.
+func (h *usersHandler) export(c *gin.Context) {
+	uid := CurrentUserID(c)
+	ctx := c.Request.Context()
+
+	var items []models.TrackingItem
+	if err := h.db.WithContext(ctx).Where("user_id = ?", uid).Order("type, title COLLATE NOCASE").Find(&items).Error; err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading library export")
+		return
+	}
+
+	format := c.DefaultQuery("format", "json")
+	if format == "csv" {
+		buf := &bytes.Buffer{}
+		w := csv.NewWriter(buf)
+		_ = w.Write([]string{"id", "type", "external_id", "title", "status", "progress", "rating", "updated_at"})
+		for _, it := range items {
+			_ = w.Write([]string{
+				strconv.FormatUint(uint64(it.ID), 10),
+				it.Type,
+				it.ExternalID,
+				it.Title,
+				it.Status,
+				strconv.Itoa(it.Progress),
+				strconv.Itoa(it.Rating),
+				it.UpdatedAt.Format(time.RFC3339),
+			})
+		}
+		w.Flush()
+
+		c.Header("Content-Type", "text/csv; charset=utf-8")
+		c.Header("Content-Disposition", `attachment; filename="omnishelf-export.csv"`)
+		c.Data(http.StatusOK, "text/csv; charset=utf-8", buf.Bytes())
+		return
+	}
+
+	// Default to JSON export
+	type exportItem struct {
+		ID         uint      `json:"id"`
+		Type       string    `json:"type"`
+		ExternalID string    `json:"externalId"`
+		Title      string    `json:"title"`
+		Status     string    `json:"status"`
+		Progress   int       `json:"progress"`
+		Rating     int       `json:"rating"`
+		UpdatedAt  time.Time `json:"updatedAt"`
+	}
+	out := make([]exportItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, exportItem{
+			ID:         it.ID,
+			Type:       it.Type,
+			ExternalID: it.ExternalID,
+			Title:      it.Title,
+			Status:     it.Status,
+			Progress:   it.Progress,
+			Rating:     it.Rating,
+			UpdatedAt:  it.UpdatedAt,
+		})
+	}
+
+	c.Header("Content-Type", "application/json; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="omnishelf-export-%s.json"`, time.Now().Format("2006-01-02")))
+	c.JSON(http.StatusOK, out)
 }
 
 // library handles GET /api/users/:id/library?type=&status= — a read-only

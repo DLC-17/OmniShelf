@@ -113,51 +113,74 @@ type cardPayload struct {
 	} `json:"cardmarket"`
 }
 
-// FindCard searches for a card by its printed name and collector number.
-// number is the part before the slash with leading zeros stripped ("4" for
-// "004/102"); printedTotal is the part after it ("102"). The exact entry whose
-// number equals number and whose set's printedTotal (or total) equals
-// printedTotal wins; when no entry matches exactly the first result is used.
-// An empty result set yields ErrNotFound.
-func (c *Client) FindCard(ctx context.Context, name, number, printedTotal string) (*Card, error) {
-	// The name comes from OCR: quotes, backslashes and other Lucene query
-	// operators in it malform the API's q syntax (HTTP 400). Inside a quoted
-	// phrase only `"` and `\` are unsafe, so strip those; an empty remainder
-	// can never match a card, so report it as a miss rather than querying.
-	name = strings.TrimSpace(strings.NewReplacer(`"`, "", `\`, "").Replace(name))
-	if name == "" {
-		return nil, fmt.Errorf("%w: empty card name after OCR cleanup", ErrNotFound)
-	}
-	q := url.Values{"q": {fmt.Sprintf(`name:"%s" number:%s`, name, number)}}
+// sanitizeLucene cleans Lucene query operator characters that cause api.pokemontcg.io
+// to crash with HTTP 500.
+func sanitizeLucene(s string) string {
+	repl := strings.NewReplacer(
+		`"`, " ", `\`, " ", `/`, " ", `:`, " ", `+`, " ", `-`, " ", `!`, " ", `(`, " ", `)`, " ",
+		`{`, " ", `}`, " ", `[`, " ", `]`, " ", `^`, " ", `~`, " ", `*`, " ", `?`, " ", `&`, " ", `|`, " ",
+	)
+	return strings.Join(strings.Fields(repl.Replace(s)), " ")
+}
 
-	// The API sporadically stalls past even the generous client timeout while
-	// an immediate retry succeeds, so one transport-level failure gets a
-	// second attempt before the scan is failed. The request must be rebuilt
-	// per attempt: an *http.Request is single-use.
+// queryCards executes a single search query against the Pokémon TCG API with retries for transient 5xx/429 errors.
+func (c *Client) queryCards(ctx context.Context, query string) ([]cardPayload, error) {
+	q := url.Values{"q": {query}}
+	reqURL := c.baseURL + "/cards?" + q.Encode()
+
 	var resp *http.Response
-	for attempt := 0; ; attempt++ {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/cards?"+q.Encode(), nil)
-		if err != nil {
-			return nil, fmt.Errorf("pokemontcg: build request: %w", err)
+	var raw []byte
+	var err error
+
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt*500) * time.Millisecond):
+			}
+		}
+
+		req, rerr := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if rerr != nil {
+			return nil, fmt.Errorf("pokemontcg: build request: %w", rerr)
 		}
 		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "OmniShelf/1.0 (Media Tracker)")
 		if c.apiKey != "" {
 			req.Header.Set("X-Api-Key", c.apiKey)
 		}
 
 		resp, err = c.httpClient.Do(req)
-		if err == nil {
-			break
+		if err != nil {
+			continue
 		}
-		if attempt >= 1 || ctx.Err() != nil {
-			return nil, errors.Join(ErrUpstream, err)
-		}
-	}
-	defer func() { _ = resp.Body.Close() }()
 
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<22))
+		raw, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<22))
+		_ = resp.Body.Close()
+
+		// Retry on Cloudflare / upstream transient server errors
+		if resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout ||
+			resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusInternalServerError {
+			continue
+		}
+
+		// Non-retryable status or success
+		break
+	}
+
+	if err != nil {
+		return nil, errors.Join(ErrUpstream, err)
+	}
+	if resp == nil {
+		return nil, ErrUpstream
+	}
+
 	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("%w for %q number %s", ErrNotFound, name, number)
+		return nil, ErrNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%w: cards returned status %d: %s", ErrUpstream, resp.StatusCode, string(raw))
@@ -167,30 +190,122 @@ func (c *Client) FindCard(ctx context.Context, name, number, printedTotal string
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, fmt.Errorf("%w: decode cards: %v", ErrUpstream, err)
 	}
-	if len(payload.Data) == 0 {
+	return payload.Data, nil
+}
+
+// FindCard searches for a card by its printed name and collector number.
+// number is the part before the slash with leading zeros stripped ("4" for
+// "004/102"); printedTotal is the part after it ("102").
+//
+// Because api.pokemontcg.io frequently returns HTTP 500 when Lucene queries
+// encounter special characters or OCR noise, FindCard tries queries in a
+// fallback waterfall:
+//  1. name:"<cleaned name>" number:<number>
+//  2. name:<first word>* number:<number>
+//  3. number:<number> (filtered client-side by set total / card name)
+func (c *Client) FindCard(ctx context.Context, name, number, printedTotal string) (*Card, error) {
+	cleanName := sanitizeLucene(name)
+	cleanNum := sanitizeLucene(number)
+	if cleanNum == "" && cleanName == "" {
+		return nil, fmt.Errorf("%w: empty card name and number after OCR cleanup", ErrNotFound)
+	}
+
+	words := strings.Fields(cleanName)
+	firstWord := ""
+	lastWord := ""
+	if len(words) > 0 {
+		firstWord = words[0]
+		lastWord = words[len(words)-1]
+	}
+
+	var queries []string
+	if cleanName != "" && cleanNum != "" {
+		queries = append(queries, fmt.Sprintf(`name:"%s" number:%s`, cleanName, cleanNum))
+	}
+	if lastWord != "" && cleanNum != "" && lastWord != cleanName {
+		queries = append(queries, fmt.Sprintf(`name:%s* number:%s`, lastWord, cleanNum))
+	}
+	if firstWord != "" && firstWord != lastWord && cleanNum != "" {
+		queries = append(queries, fmt.Sprintf(`name:%s* number:%s`, firstWord, cleanNum))
+	}
+	if cleanNum != "" {
+		queries = append(queries, fmt.Sprintf(`number:%s`, cleanNum))
+	}
+	if cleanName != "" && len(queries) == 0 {
+		queries = append(queries, fmt.Sprintf(`name:"%s"`, cleanName))
+	}
+
+	var data []cardPayload
+	var lastErr error
+
+	for _, q := range queries {
+		results, err := c.queryCards(ctx, q)
+		if err == nil && len(results) > 0 {
+			data = results
+			lastErr = nil
+			break
+		}
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			lastErr = err
+		}
+	}
+
+	if len(data) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
 		return nil, fmt.Errorf("%w for %q number %s", ErrNotFound, name, number)
 	}
 
-	pick := payload.Data[0]
-	if total, terr := strconv.Atoi(printedTotal); terr == nil {
-		for _, d := range payload.Data {
-			if d.Number == number && (d.Set.PrintedTotal == total || d.Set.Total == total) {
-				pick = d
-				break
+	// Pick the highest scoring match from the candidate results.
+	total, _ := strconv.Atoi(printedTotal)
+	bestPick := data[0]
+	bestScore := -1
+
+	for _, d := range data {
+		score := 0
+		upperName := strings.ToUpper(d.Name)
+
+		// Exact collector number match
+		if cleanNum != "" && d.Number == cleanNum {
+			score += 50
+		}
+
+		// Set total match
+		if total > 0 && (d.Set.PrintedTotal == total || d.Set.Total == total) {
+			score += 40
+		}
+
+		// Word-level name matching (prioritize species/sub-names)
+		for _, w := range words {
+			upperW := strings.ToUpper(w)
+			if len(upperW) < 2 {
+				continue
 			}
+			if upperName == upperW {
+				score += 100 // exact full name match
+			} else if strings.Contains(upperName, upperW) {
+				// Substring match (e.g., "ZORUA" inside "Hisuian Zorua" or "N's Zorua")
+				score += 60
+			}
+		}
+
+		if score > bestScore {
+			bestScore = score
+			bestPick = d
 		}
 	}
 
 	return &Card{
-		ID:             pick.ID,
-		Name:           pick.Name,
-		Supertype:      pick.Supertype,
-		Subtypes:       pick.Subtypes,
-		Artist:         pick.Artist,
-		SetName:        pick.Set.Name,
-		SetReleaseDate: pick.Set.ReleaseDate,
-		Price:          pick.marketPrice(),
-		ImageURL:       pick.Images.Large,
+		ID:             bestPick.ID,
+		Name:           bestPick.Name,
+		Supertype:      bestPick.Supertype,
+		Subtypes:       bestPick.Subtypes,
+		Artist:         bestPick.Artist,
+		SetName:        bestPick.Set.Name,
+		SetReleaseDate: bestPick.Set.ReleaseDate,
+		Price:          bestPick.marketPrice(),
+		ImageURL:       bestPick.Images.Large,
 	}, nil
 }
 

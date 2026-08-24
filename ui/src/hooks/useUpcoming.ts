@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchUpcoming } from '../api/tv'
-import type { UpcomingByType } from '../api/tv'
+import { fetchUpcoming } from '../api/upcoming'
+import type { UpcomingByType } from '../api/upcoming'
 
 /** Query key for the cross-media Upcoming board. */
 export const UPCOMING_KEY = ['upcoming'] as const

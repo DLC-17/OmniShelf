@@ -29,9 +29,15 @@ export default function Poster({ posterPath, title, width = 80, height = 120 }: 
     )
   }
 
+  const imageSrc = posterPath.startsWith('http://') || posterPath.startsWith('https://')
+    ? posterPath
+    : posterPath.startsWith('//')
+      ? `https:${posterPath}`
+      : `/images/${posterPath}`
+
   return (
     <img
-      src={`/images/${posterPath}`}
+      src={imageSrc}
       alt={`Poster for ${title}`}
       width={width}
       height={height}

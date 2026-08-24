@@ -63,19 +63,27 @@ func Slugify(name string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// MaxTagsPerMedia is the strict maximum number of tags allowed per media item.
+const MaxTagsPerMedia = 5
+
 // Set replaces the tags on one media cache row with the given names. Tag rows
 // are created on demand (deduped by slug) and reused across items. Blank or
-// duplicate names are ignored. It is best-effort by contract of its callers:
-// enrichment paths log and continue rather than fail an add on a tag error.
+// duplicate names are ignored. A strict maximum of 5 tags is enforced. It is
+// best-effort by contract of its callers: enrichment paths log and continue
+// rather than fail an add on a tag error.
 func (s *Store) Set(ctx context.Context, mediaType string, mediaID uint, names []string) error {
 	if mediaID == 0 {
 		return fmt.Errorf("tags: media id must be non-zero")
 	}
 
 	// Resolve each unique slug to a Tag id, creating missing rows.
-	tagIDs := make([]uint, 0, len(names))
+	// Enforce strict 5 tag limit across all media.
+	tagIDs := make([]uint, 0, MaxTagsPerMedia)
 	seen := map[string]bool{}
 	for _, name := range names {
+		if len(tagIDs) >= MaxTagsPerMedia {
+			break
+		}
 		slug := Slugify(name)
 		if slug == "" || seen[slug] {
 			continue

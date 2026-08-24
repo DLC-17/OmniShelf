@@ -11,7 +11,7 @@ interface AlbumConfirmCardProps {
 
 const STATUS_LABELS: Record<MusicStatus, string> = {
   LISTENING: 'Listening',
-  PLAN_TO: 'Plan to listen',
+  PLAN_TO: 'Not started',
   COMPLETED: 'Listened',
   STOPPED: 'Set aside',
 }

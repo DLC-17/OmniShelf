@@ -15,7 +15,12 @@ export function useNotes(itemId: number, enabled = true) {
 export function useAddNote(itemId: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: string) => addNote(itemId, body),
+    mutationFn: (variables: { body: string; sentiment?: string } | string) => {
+      if (typeof variables === 'string') {
+        return addNote(itemId, variables)
+      }
+      return addNote(itemId, variables.body, variables.sentiment)
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: [...NOTES_KEY, itemId] })
     },

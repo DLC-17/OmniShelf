@@ -42,6 +42,9 @@ type Client struct {
 	mu          sync.Mutex
 	token       string
 	tokenExpiry time.Time
+
+	rateMu  sync.Mutex
+	lastReq time.Time
 }
 
 // Option customizes a Client.
@@ -83,6 +86,91 @@ func New(clientID, clientSecret string, opts ...Option) *Client {
 		o(c)
 	}
 	return c
+}
+
+// queryAPI executes an Apicalypse query against the IGDB v4 API with built-in
+// rate pacing (max ~3.8 req/sec, minimum 260ms between calls) and automatic
+// exponential backoff retry when receiving HTTP 429 Too Many Requests.
+func (c *Client) queryAPI(ctx context.Context, endpoint string, body string) ([]byte, error) {
+	if !c.Configured() {
+		return nil, ErrUnconfigured
+	}
+
+	const maxRetries = 4
+	backoff := 500 * time.Millisecond
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		// Enforce minimum 260ms spacing between requests across the client
+		c.rateMu.Lock()
+		elapsed := time.Since(c.lastReq)
+		if elapsed < 260*time.Millisecond {
+			time.Sleep(260*time.Millisecond - elapsed)
+		}
+		c.lastReq = time.Now()
+		c.rateMu.Unlock()
+
+		token, err := c.getToken(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+endpoint, strings.NewReader(body))
+		if err != nil {
+			return nil, fmt.Errorf("igdb: build request: %w", err)
+		}
+		req.Header.Set("Client-ID", c.clientID)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Accept", "application/json")
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			if attempt < maxRetries-1 {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+			return nil, fmt.Errorf("igdb: request %s: %w", endpoint, err)
+		}
+
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retrySec := 0
+			if ra := resp.Header.Get("Retry-After"); ra != "" {
+				if s, convErr := strconv.Atoi(ra); convErr == nil && s > 0 {
+					retrySec = s
+				}
+			}
+			wait := time.Duration(retrySec) * time.Second
+			if wait == 0 {
+				wait = backoff + 500*time.Millisecond
+			}
+			if attempt < maxRetries-1 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(wait):
+				}
+				backoff *= 2
+				continue
+			}
+			return nil, fmt.Errorf("igdb: %s returned status 429 (rate limited): %s", endpoint, string(raw))
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			if (resp.StatusCode >= 500 && resp.StatusCode <= 599) && attempt < maxRetries-1 {
+				time.Sleep(backoff)
+				backoff *= 2
+				continue
+			}
+			return nil, fmt.Errorf("igdb: %s returned status %d: %s", endpoint, resp.StatusCode, string(raw))
+		}
+
+		return raw, nil
+	}
+
+	return nil, fmt.Errorf("igdb: %s exceeded maximum retry attempts", endpoint)
 }
 
 // Configured reports whether credentials were supplied.
@@ -132,33 +220,10 @@ type gamePayload struct {
 // A missing game yields (nil, nil) — not an error — so callers can keep the
 // ScanDex title/platform without a cover or summary.
 func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
-	if !c.Configured() {
-		return nil, ErrUnconfigured
-	}
-
-	token, err := c.getToken(ctx)
+	body := fmt.Sprintf("fields name,summary,first_release_date,cover.image_id,genres.name,keywords.name; where id = %d;", igdbID)
+	raw, err := c.queryAPI(ctx, "/games", body)
 	if err != nil {
 		return nil, err
-	}
-
-	body := fmt.Sprintf("fields name,summary,first_release_date,cover.image_id,genres.name,keywords.name; where id = %d;", igdbID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("igdb: build request: %w", err)
-	}
-	req.Header.Set("Client-ID", c.clientID)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("igdb: request games: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("igdb: games returned status %d: %s", resp.StatusCode, string(raw))
 	}
 
 	var payloads []gamePayload
@@ -208,36 +273,13 @@ type searchPayload struct {
 // IGDB relevance. An unconfigured client yields ErrUnconfigured. Callers use the
 // returned IGDB ids to add a game by name (identity = IGDB id).
 func (c *Client) SearchGames(ctx context.Context, name string) ([]SearchResult, error) {
-	if !c.Configured() {
-		return nil, ErrUnconfigured
-	}
-
-	token, err := c.getToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	// Escape embedded backslashes/quotes so the Apicalypse search string stays
 	// valid for a user-supplied query.
 	safe := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(name)
 	body := fmt.Sprintf(`search "%s"; fields name,first_release_date,cover.image_id; limit 20;`, safe)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
+	raw, err := c.queryAPI(ctx, "/games", body)
 	if err != nil {
-		return nil, fmt.Errorf("igdb: build search request: %w", err)
-	}
-	req.Header.Set("Client-ID", c.clientID)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("igdb: request search: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<18))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("igdb: search returned status %d: %s", resp.StatusCode, string(raw))
+		return nil, err
 	}
 
 	var payloads []searchPayload
@@ -294,39 +336,17 @@ type similarPayload struct {
 // map. An unconfigured client yields ErrUnconfigured; an empty seed list yields
 // an empty map without a round-trip.
 func (c *Client) SimilarGames(ctx context.Context, seedIDs []int) (map[int][]SimilarGame, error) {
-	if !c.Configured() {
-		return nil, ErrUnconfigured
-	}
 	if len(seedIDs) == 0 {
 		return map[int][]SimilarGame{}, nil
-	}
-
-	token, err := c.getToken(ctx)
-	if err != nil {
-		return nil, err
 	}
 
 	body := fmt.Sprintf(
 		"fields similar_games.name,similar_games.first_release_date,similar_games.summary,similar_games.cover.image_id; where id = (%s); limit %d;",
 		joinInts(seedIDs), len(seedIDs),
 	)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.apiURL+"/games", strings.NewReader(body))
+	raw, err := c.queryAPI(ctx, "/games", body)
 	if err != nil {
-		return nil, fmt.Errorf("igdb: build similar request: %w", err)
-	}
-	req.Header.Set("Client-ID", c.clientID)
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("igdb: request similar: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("igdb: similar returned status %d: %s", resp.StatusCode, string(raw))
+		return nil, err
 	}
 
 	var payloads []similarPayload

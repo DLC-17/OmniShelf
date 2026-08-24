@@ -64,6 +64,8 @@ export interface LibraryItem {
   tags: string[]
   /** User-selected ownership formats (games: Physical/GOG; music: Vinyl/CD); [] when none. */
   ownership: string[]
+  /** Optional physical shelf/room location tag (e.g. 'Living Room Shelf A'). */
+  location?: string
   updatedAt: string
 }
 
@@ -84,6 +86,7 @@ export interface UpdateItemPatch {
   status?: ItemStatus
   progress?: number
   rating?: number
+  location?: string
 }
 
 export function updateItem(id: number, patch: UpdateItemPatch): Promise<LibraryItem> {

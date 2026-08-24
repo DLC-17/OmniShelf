@@ -148,11 +148,6 @@ func (h *feedHandler) list(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	watches, err := h.watchEntries(ctx, cur, limit)
-	if err != nil {
-		Error(c, http.StatusInternalServerError, CodeInternal, "loading activity feed")
-		return
-	}
 	items, err := h.itemEntries(ctx, cur, limit)
 	if err != nil {
 		Error(c, http.StatusInternalServerError, CodeInternal, "loading activity feed")
@@ -161,8 +156,7 @@ func (h *feedHandler) list(c *gin.Context) {
 
 	// Each source query already returns its own top `limit` entries after
 	// the cursor, so the merged top `limit` is globally correct.
-	entries := make([]feedEntry, 0, len(watches)+len(items))
-	entries = append(entries, watches...)
+	entries := make([]feedEntry, 0, len(items))
 	entries = append(entries, items...)
 	sort.Slice(entries, func(i, j int) bool { return feedLess(entries[i], entries[j]) })
 	if len(entries) > limit {

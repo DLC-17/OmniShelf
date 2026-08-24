@@ -68,3 +68,20 @@ export function addCard(card: Card, status?: string): Promise<AddCardResponse> {
   if (status !== undefined) body.status = status
   return request<AddCardResponse>('/api/cards/add', { method: 'POST', body })
 }
+
+/** Historical market price snapshot for a trading card. */
+export interface CardPriceSnapshot {
+  id?: number
+  cardId?: number
+  price: number
+  lowPrice?: number
+  midPrice?: number
+  marketPrice?: number
+  snapshotAt: string
+}
+
+/** Fetch historical price snapshots for a card, ordered chronologically. */
+export function fetchCardPriceHistory(cardIdOrExternalId: number | string): Promise<CardPriceSnapshot[]> {
+  return request<CardPriceSnapshot[]>(`/api/cards/${cardIdOrExternalId}/price-history`).catch(() => [])
+}
+

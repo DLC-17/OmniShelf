@@ -94,6 +94,7 @@ function EditionPicker({ work }: { work: BookSearchResult }) {
 export default function BookSearch() {
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')
+  const [collapsed, setCollapsed] = useState(false)
   const [openWork, setOpenWork] = useState<string | null>(null)
 
   const search = useBookSearch(query)
@@ -102,6 +103,7 @@ export default function BookSearch() {
     event.preventDefault()
     setQuery(input.trim())
     setOpenWork(null)
+    setCollapsed(false) // automatically expand on a new search
   }
 
   return (
@@ -115,52 +117,74 @@ export default function BookSearch() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
         />
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{
+            padding: '0 0.5rem',
+            fontSize: '0.9rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            transform: collapsed ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s ease',
+          }}
+          onClick={() => setCollapsed((prev) => !prev)}
+          aria-label={collapsed ? 'Expand search results' : 'Collapse search results'}
+          title={collapsed ? 'Expand search results' : 'Collapse search results'}
+        >
+          ▲
+        </button>
         <button type="submit" className="btn-primary" disabled={input.trim() === ''}>
           Search
         </button>
       </form>
 
-      {search.isFetching && <p className="muted">Searching…</p>}
-      {search.isError && (
-        <p role="alert" className="alert">
-          {search.error instanceof ApiError && search.error.code === 'upstream_error'
-            ? 'OpenLibrary unreachable, try again'
-            : 'Search failed. Try again.'}
-        </p>
-      )}
-      {search.data !== undefined && search.data.length === 0 && (
-        <p>No books found for “{query}”.</p>
-      )}
-      {search.data !== undefined && search.data.length > 0 && (
-        <ul className="list">
-          {search.data.map((work) => {
-            const open = openWork === work.workKey
-            return (
-              <li key={work.workKey} className="card">
-                <div className="card-row">
-                  <SearchCover
-                    src={work.coverId !== 0 ? `/api/covers/book/${work.coverId}` : null}
-                    title={work.title}
-                  />
-                  <div className="grow">
-                    <strong>{work.title}</strong>
-                    {work.firstYear !== 0 && <span className="muted"> ({work.firstYear})</span>}
-                    {work.authors !== '' && <p className="meta">{work.authors}</p>}
-                  </div>
-                  <button
-                    type="button"
-                    className="btn-confirm"
-                    aria-expanded={open}
-                    onClick={() => setOpenWork(open ? null : work.workKey)}
-                  >
-                    {open ? 'Hide editions' : `Choose edition (${work.editionCount})`}
-                  </button>
-                </div>
-                {open && <EditionPicker work={work} />}
-              </li>
-            )
-          })}
-        </ul>
+      {!collapsed && (
+        <>
+          {search.isFetching && <p className="muted">Searching…</p>}
+          {search.isError && (
+            <p role="alert" className="alert">
+              {search.error instanceof ApiError && search.error.code === 'upstream_error'
+                ? 'OpenLibrary unreachable, try again'
+                : 'Search failed. Try again.'}
+            </p>
+          )}
+          {search.data !== undefined && search.data.length === 0 && (
+            <p>No books found for “{query}”.</p>
+          )}
+          {search.data !== undefined && search.data.length > 0 && (
+            <ul className="list">
+              {search.data.map((work) => {
+                const open = openWork === work.workKey
+                return (
+                  <li key={work.workKey} className="card">
+                    <div className="card-row">
+                      <SearchCover
+                        src={work.coverId !== 0 ? `/api/covers/book/${work.coverId}` : null}
+                        title={work.title}
+                      />
+                      <div className="grow">
+                        <strong>{work.title}</strong>
+                        {work.firstYear !== 0 && <span className="muted"> ({work.firstYear})</span>}
+                        {work.authors !== '' && <p className="meta">{work.authors}</p>}
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-confirm"
+                        aria-expanded={open}
+                        onClick={() => setOpenWork(open ? null : work.workKey)}
+                      >
+                        {open ? 'Hide editions' : `Choose edition (${work.editionCount})`}
+                      </button>
+                    </div>
+                    {open && <EditionPicker work={work} />}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </>
       )}
     </section>
   )

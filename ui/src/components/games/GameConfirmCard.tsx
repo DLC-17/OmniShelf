@@ -11,7 +11,7 @@ interface GameConfirmCardProps {
 
 const STATUS_LABELS: Record<GameStatus, string> = {
   PLAYING: 'Playing',
-  PLAN_TO: 'Plan to play',
+  PLAN_TO: 'Not started',
   COMPLETED: 'Completed',
   STOPPED: 'Stopped playing',
 }

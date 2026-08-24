@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
@@ -13,6 +14,7 @@ import ShowSearch from '../components/tv/ShowSearch'
 import GameSearch from '../components/games/GameSearch'
 import BookSearch from '../components/books/BookSearch'
 import { formatUsd } from '../lib/currency'
+import PriceSparkline from '../components/cards/PriceSparkline'
 
 const TABS: { value: MediaType; label: string }[] = [
   { value: 'TV', label: 'TV Shows' },
@@ -93,14 +95,14 @@ function groupByGameAndSet(
   }))
 }
 
-/** Status sections shown in order, with media-specific labels. */
+/** Status sections shown in order, with media-specific labels. Not started is placed at the bottom. */
 function sectionsFor(media: Exclude<MediaType, 'CARD'>): { status: ItemStatus; label: string }[] {
   const active = ACTIVE[media]
   return [
     { status: active.status, label: active.label },
-    { status: 'PLAN_TO', label: 'Not started' },
     { status: 'COMPLETED', label: 'Completed' },
     { status: 'STOPPED', label: active.stopped },
+    { status: 'PLAN_TO', label: 'Not started' },
   ]
 }
 
@@ -111,12 +113,26 @@ function sectionsFor(media: Exclude<MediaType, 'CARD'>): { status: ItemStatus; l
  * tab also carries a search-and-add box.
  */
 export default function Library() {
-  const [media, setMedia] = useState<MediaType>('TV')
+  const [searchParams] = useSearchParams()
+  const initialType = searchParams.get('type') as MediaType | null
+  const [media, setMedia] = useState<MediaType>(
+    initialType && ['TV', 'BOOK', 'GAME', 'MOVIE', 'MUSIC', 'CARD'].includes(initialType)
+      ? initialType
+      : 'TV',
+  )
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [collapsed, setCollapsed] = useState<Set<ItemStatus>>(new Set())
   // Per-tab library search + filters, applied client-side to the loaded items.
   const [search, setSearch] = useState('')
   const [filters, setFilters] = useState<FilterState>({})
+  const [cardFilter, setCardFilter] = useState<'ALL' | 'POKEMON' | 'YUGIOH'>('ALL')
+
+  useEffect(() => {
+    const typeParam = searchParams.get('type') as MediaType | null
+    if (typeParam && ['TV', 'BOOK', 'GAME', 'MOVIE', 'MUSIC', 'CARD'].includes(typeParam) && typeParam !== media) {
+      setMedia(typeParam)
+    }
+  }, [searchParams, media])
 
   const toggleSection = (status: ItemStatus) =>
     setCollapsed((prev) => {
@@ -133,6 +149,26 @@ export default function Library() {
     () => applyLibrarySearch(library.data ?? [], search, filters, media),
     [library.data, search, filters, media],
   )
+
+  // Card valuation and filter calculations
+  const pokemonCards = useMemo(() => items.filter((c) => c.externalId.startsWith('ptcg:')), [items])
+  const yugiohCards = useMemo(() => items.filter((c) => c.externalId.startsWith('ygo:')), [items])
+  const pokemonValuation = useMemo(() => pokemonCards.reduce((sum, c) => sum + (c.price || 0), 0), [pokemonCards])
+  const yugiohValuation = useMemo(() => yugiohCards.reduce((sum, c) => sum + (c.price || 0), 0), [yugiohCards])
+  const totalCardValuation = useMemo(() => items.reduce((sum, c) => sum + (c.price || 0), 0), [items])
+
+  const filteredCardItems = useMemo(() => {
+    if (cardFilter === 'POKEMON') return visible.filter((c) => c.externalId.startsWith('ptcg:'))
+    if (cardFilter === 'YUGIOH') return visible.filter((c) => c.externalId.startsWith('ygo:'))
+    return visible
+  }, [visible, cardFilter])
+
+  const currentCardValuation = useMemo(() => {
+    if (cardFilter === 'POKEMON') return pokemonValuation
+    if (cardFilter === 'YUGIOH') return yugiohValuation
+    return totalCardValuation
+  }, [cardFilter, pokemonValuation, yugiohValuation, totalCardValuation])
+
   const selected = items.find((i) => i.id === selectedId) ?? null
 
   return (
@@ -262,9 +298,91 @@ export default function Library() {
           )
         })}
 
+      {media === 'CARD' && items.length > 0 && (
+        <div
+          className="card"
+          style={{
+            marginBottom: '1.5rem',
+            background: 'linear-gradient(135deg, var(--surface) 0%, var(--surface-alt) 100%)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+            padding: '1.25rem',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div>
+              <span style={{ fontSize: '0.85rem', fontWeight: 650, textTransform: 'uppercase', letterSpacing: '0.05em' }} className="muted">
+                Total Collection Valuation
+              </span>
+              <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text)', marginTop: '0.2rem' }}>
+                {formatUsd(currentCardValuation)}
+              </div>
+            </div>
+
+            {/* TCG Selection Chips */}
+            <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setCardFilter('ALL')}
+                style={{
+                  padding: '0.25rem 0.7rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: cardFilter === 'ALL' ? '1px solid var(--accent, #6366f1)' : '1px solid var(--border)',
+                  backgroundColor: cardFilter === 'ALL' ? 'var(--accent, #6366f1)' : 'var(--surface-alt)',
+                  color: cardFilter === 'ALL' ? '#fff' : 'var(--text)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                All ({items.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setCardFilter('POKEMON')}
+                style={{
+                  padding: '0.25rem 0.7rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: cardFilter === 'POKEMON' ? '1px solid var(--accent, #6366f1)' : '1px solid var(--border)',
+                  backgroundColor: cardFilter === 'POKEMON' ? 'var(--accent, #6366f1)' : 'var(--surface-alt)',
+                  color: cardFilter === 'POKEMON' ? '#fff' : 'var(--text)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                ⚡ Pokémon ({pokemonCards.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setCardFilter('YUGIOH')}
+                style={{
+                  padding: '0.25rem 0.7rem',
+                  borderRadius: '9999px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  border: cardFilter === 'YUGIOH' ? '1px solid var(--accent, #6366f1)' : '1px solid var(--border)',
+                  backgroundColor: cardFilter === 'YUGIOH' ? 'var(--accent, #6366f1)' : 'var(--surface-alt)',
+                  color: cardFilter === 'YUGIOH' ? '#fff' : 'var(--text)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                ⚔️ Yu-Gi-Oh! ({yugiohCards.length})
+              </button>
+            </div>
+          </div>
+          <div style={{ marginTop: '0.75rem' }}>
+            <PriceSparkline currentPrice={currentCardValuation} width={450} height={90} />
+          </div>
+        </div>
+      )}
+
       {media === 'CARD' &&
-        visible.length > 0 &&
-        groupByGameAndSet(visible).map(({ game, sets }) => (
+        filteredCardItems.length > 0 &&
+        groupByGameAndSet(filteredCardItems).map(({ game, sets }) => (
           <section key={game} aria-label={game}>
             <h2>{game}</h2>
             {sets.map(({ set, cards }) => {
@@ -312,7 +430,21 @@ export default function Library() {
         media !== 'CARD' &&
         visible.length > 0 &&
         sectionsFor(media).map(({ status, label }) => {
-          const sectionItems = visible.filter((i) => i.status === status)
+          let sectionItems: LibraryItem[]
+          if (media === 'TV') {
+            if (status === 'WATCHING') {
+              // Only TV shows with at least 1 watched episode stay in Watching
+              sectionItems = visible.filter((i) => i.status === 'WATCHING' && i.progress > 0)
+            } else if (status === 'PLAN_TO') {
+              // TV shows with 0 watched episodes or explicitly in PLAN_TO are grouped under Not started
+              sectionItems = visible.filter((i) => i.status === 'PLAN_TO' || (i.status === 'WATCHING' && i.progress === 0))
+            } else {
+              sectionItems = visible.filter((i) => i.status === status)
+            }
+          } else {
+            sectionItems = visible.filter((i) => i.status === status)
+          }
+
           if (sectionItems.length === 0) return null
           const open = !collapsed.has(status)
           return (

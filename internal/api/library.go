@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,7 @@ type itemResponse struct {
 	Status      string    `json:"status"`
 	Progress    int       `json:"progress"`
 	Rating      int       `json:"rating"`
+	Location    string    `json:"location"`
 	ArtworkPath string    `json:"artworkPath"`
 	ShowID      uint      `json:"showId"`
 	Authors     string    `json:"authors"`
@@ -64,6 +66,7 @@ func toItemResponse(item *models.TrackingItem) itemResponse {
 		Status:     item.Status,
 		Progress:   item.Progress,
 		Rating:     item.Rating,
+		Location:   item.Location,
 		Tags:       []string{}, // never null; overwritten with the real set for library rows
 		Ownership:  []string{}, // never null; overwritten with the real set for library rows
 		UpdatedAt:  item.UpdatedAt,
@@ -97,13 +100,35 @@ type updateItemRequest struct {
 	Status   *string `json:"status"`
 	Progress *int    `json:"progress"`
 	Rating   *int    `json:"rating"`
+	Location *string `json:"location"`
 }
 
 // list handles GET /api/library?type=&status= — the current user's shelf,
 // enriched with artwork and book metadata.
 func (h *libraryHandler) list(c *gin.Context) {
-	entries, err := h.svc.ListLibrary(c.Request.Context(), CurrentUserID(c),
-		c.Query("type"), c.Query("status"))
+	filter := books.LibraryFilter{
+		Type:       c.Query("type"),
+		Status:     c.Query("status"),
+		Location:   c.Query("location"),
+		Collection: c.Query("collection"),
+	}
+
+	if ratingStr := c.Query("rating"); ratingStr != "" {
+		if r, err := strconv.Atoi(ratingStr); err == nil {
+			filter.Rating = &r
+		}
+	}
+
+	if tagStr := c.Query("tag"); tagStr != "" {
+		// tag is a comma-separated list of tags
+		tags := strings.Split(tagStr, ",")
+		for i := range tags {
+			tags[i] = strings.TrimSpace(tags[i])
+		}
+		filter.Tags = tags
+	}
+
+	entries, err := h.svc.ListLibrary(c.Request.Context(), CurrentUserID(c), filter)
 	switch {
 	case errors.Is(err, books.ErrInvalidFilter):
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, MUSIC, or CARD; status must be WATCHING, READING, PLAYING, LISTENING, OWNED, PLAN_TO, COMPLETED, or STOPPED")
@@ -118,7 +143,7 @@ func (h *libraryHandler) list(c *gin.Context) {
 	}
 }
 
-// update handles PATCH /api/items/:id {status?, progress?}.
+// update handles PATCH /api/items/:id {status?, progress?, rating?, location?}.
 func (h *libraryHandler) update(c *gin.Context) {
 	itemID, ok := itemIDParam(c)
 	if !ok {
@@ -126,14 +151,14 @@ func (h *libraryHandler) update(c *gin.Context) {
 	}
 	var req updateItemRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with status and/or progress")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with status, progress, rating, and/or location")
 		return
 	}
 
-	item, err := h.svc.UpdateItem(c.Request.Context(), CurrentUserID(c), itemID, req.Status, req.Progress, req.Rating)
+	item, err := h.svc.UpdateItem(c.Request.Context(), CurrentUserID(c), itemID, req.Status, req.Progress, req.Rating, req.Location)
 	switch {
 	case errors.Is(err, books.ErrEmptyUpdate):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "provide status, progress, and/or rating")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "provide status, progress, rating, and/or location")
 	case errors.Is(err, books.ErrInvalidStatus):
 		Error(c, http.StatusBadRequest, CodeInvalidRequest, "status is not valid for this item's type")
 	case errors.Is(err, books.ErrInvalidProgress):

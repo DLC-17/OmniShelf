@@ -313,26 +313,47 @@ func (s *Service) ListEditions(ctx context.Context, workKey string) ([]openlibra
 	return editions, nil
 }
 
-// ListItems returns the user's tracking items, optionally filtered by type
-// ("TV"/"BOOK") and status, newest activity first.
-func (s *Service) ListItems(ctx context.Context, userID uint, typ, status string) ([]models.TrackingItem, error) {
-	if typ != "" && typ != TypeTV && typ != TypeBook && typ != TypeGame && typ != TypeMovie && typ != TypeMusic && typ != TypeCard {
-		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, typ)
+// LibraryFilter encapsulates the query parameters for filtering the library.
+type LibraryFilter struct {
+	Type       string
+	Status     string
+	Rating     *int
+	Location   string
+	Tags       []string // slugs
+	Collection string   // user collection slug
+}
+
+// ListItems returns the user's tracking items, filtered by the provided criteria,
+// newest activity first.
+func (s *Service) ListItems(ctx context.Context, userID uint, filter LibraryFilter) ([]models.TrackingItem, error) {
+	if filter.Type != "" && filter.Type != TypeTV && filter.Type != TypeBook && filter.Type != TypeGame && filter.Type != TypeMovie && filter.Type != TypeMusic && filter.Type != TypeCard {
+		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, filter.Type)
 	}
-	if status != "" && !isKnownStatus(status) {
-		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidFilter, status)
+	if filter.Status != "" && !isKnownStatus(filter.Status) {
+		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidFilter, filter.Status)
 	}
 
-	q := s.db.WithContext(ctx).Where("user_id = ?", userID)
-	if typ != "" {
-		q = q.Where("type = ?", typ)
+	q := s.db.WithContext(ctx).Where("tracking_items.user_id = ?", userID)
+	if filter.Type != "" {
+		q = q.Where("tracking_items.type = ?", filter.Type)
 	}
-	if status != "" {
-		q = q.Where("status = ?", status)
+	if filter.Status != "" {
+		q = q.Where("tracking_items.status = ?", filter.Status)
+	}
+	if filter.Rating != nil {
+		q = q.Where("tracking_items.rating >= ?", *filter.Rating)
+	}
+	if filter.Location != "" {
+		q = q.Where("tracking_items.location = ?", filter.Location)
+	}
+	if filter.Collection != "" {
+		q = q.Joins("JOIN collection_items ON tracking_items.id = collection_items.item_id").
+			Joins("JOIN user_collections ON collection_items.collection_id = user_collections.id").
+			Where("user_collections.slug = ?", filter.Collection)
 	}
 
 	items := []models.TrackingItem{}
-	if err := q.Order("title COLLATE NOCASE, id").Find(&items).Error; err != nil {
+	if err := q.Order("tracking_items.title COLLATE NOCASE, tracking_items.id").Find(&items).Error; err != nil {
 		return nil, fmt.Errorf("listing items for user %d: %w", userID, err)
 	}
 	return items, nil
@@ -358,8 +379,8 @@ type LibraryEntry struct {
 
 // ListLibrary is ListItems plus the cached artwork and book metadata, joined
 // in from the shared Show/Book caches with two batch queries.
-func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status string) ([]LibraryEntry, error) {
-	items, err := s.ListItems(ctx, userID, typ, status)
+func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFilter) ([]LibraryEntry, error) {
+	items, err := s.ListItems(ctx, userID, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -368,8 +389,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 	var tmdbIDs []int
 	var movieTMDBIDs []int
 	var isbns []string
-	var gameIGDBIDs []int
-	var gameBarcodes []string
+	var gameExtIDs []string
 	var albumExtIDs []string
 	var cardExtIDs []string
 	for _, it := range items {
@@ -385,14 +405,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		case TypeBook:
 			isbns = append(isbns, it.ExternalID)
 		case TypeGame:
-			// GAME items are keyed by IGDB id (games.gameExternalID). Legacy
-			// items keyed by a barcode parse to a number that matches no IGDB
-			// id and simply fall through to the placeholder (backfill gap).
-			if id, convErr := strconv.Atoi(it.ExternalID); convErr == nil && len(it.ExternalID) < 9 {
-				gameIGDBIDs = append(gameIGDBIDs, id)
-			} else {
-				gameBarcodes = append(gameBarcodes, it.ExternalID)
-			}
+			gameExtIDs = append(gameExtIDs, it.ExternalID)
 		case TypeMusic:
 			albumExtIDs = append(albumExtIDs, it.ExternalID)
 		case TypeCard:
@@ -420,24 +433,34 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			booksByISBN[b.ISBN13] = b
 		}
 	}
+	gamesByID := map[string]models.Game{}
 	gamesByIGDB := map[string]models.Game{}
+	gamesByGOG := map[string]models.Game{}
 	gamesByBarcode := map[string]models.Game{}
-	if len(gameIGDBIDs) > 0 || len(gameBarcodes) > 0 {
+	if len(gameExtIDs) > 0 {
 		var rows []models.Game
-		q := s.db.WithContext(ctx)
-		if len(gameIGDBIDs) > 0 && len(gameBarcodes) > 0 {
-			q = q.Where("igdb_id IN ? OR barcode IN ?", gameIGDBIDs, gameBarcodes)
-		} else if len(gameIGDBIDs) > 0 {
-			q = q.Where("igdb_id IN ?", gameIGDBIDs)
-		} else {
-			q = q.Where("barcode IN ?", gameBarcodes)
+		var dbIDs []uint
+		var igdbIDs []int
+		for _, ext := range gameExtIDs {
+			if u, err := strconv.ParseUint(ext, 10, 64); err == nil {
+				dbIDs = append(dbIDs, uint(u))
+			}
+			if id, err := strconv.Atoi(ext); err == nil {
+				igdbIDs = append(igdbIDs, id)
+			}
 		}
+		q := s.db.WithContext(ctx).Where("id IN ? OR igdb_id IN ? OR gog_id IN ? OR barcode IN ?", dbIDs, igdbIDs, gameExtIDs, gameExtIDs)
 		if err := q.Find(&rows).Error; err != nil {
 			return nil, fmt.Errorf("loading game metadata: %w", err)
 		}
 		for _, g := range rows {
+			gamesByID[strconv.FormatUint(uint64(g.ID), 10)] = g
 			if g.IGDBID != 0 {
 				gamesByIGDB[strconv.Itoa(g.IGDBID)] = g
+			}
+			if g.GOGID != "" {
+				gamesByGOG[g.GOGID] = g
+				gamesByGOG["gog:"+g.GOGID] = g
 			}
 			if g.Barcode != "" {
 				gamesByBarcode[g.Barcode] = g
@@ -475,6 +498,29 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		}
 	}
 
+	// Load watched episode counts for TV items so TV shows with 0 watched episodes are identifiable as Not Started
+	tvWatchesByShowID := map[uint]int{}
+	if len(shows) > 0 {
+		var watchCounts []struct {
+			ShowID uint `gorm:"column:show_id"`
+			Count  int  `gorm:"column:count"`
+		}
+		showIDs := make([]uint, 0, len(shows))
+		for _, sh := range shows {
+			showIDs = append(showIDs, sh.ID)
+		}
+		_ = s.db.WithContext(ctx).
+			Model(&models.EpisodeWatch{}).
+			Select("episodes.show_id AS show_id, count(*) AS count").
+			Joins("JOIN episodes ON episodes.id = episode_watches.episode_id").
+			Where("episode_watches.user_id = ? AND episodes.show_id IN ?", userID, showIDs).
+			Group("episodes.show_id").
+			Scan(&watchCounts).Error
+		for _, wc := range watchCounts {
+			tvWatchesByShowID[wc.ShowID] = wc.Count
+		}
+	}
+
 	out := make([]LibraryEntry, 0, len(items))
 	// mediaKey records the shared cache-row primary key backing each entry, so
 	// its source-derived tags can be batch-loaded per media type below.
@@ -488,6 +534,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			if sh, ok := shows[it.ExternalID]; ok {
 				entry.ArtworkPath = sh.PosterPath
 				entry.ShowID = sh.ID
+				entry.Item.Progress = tvWatchesByShowID[sh.ID]
 				mediaKey[i] = sh.ID
 			}
 		case TypeBook:
@@ -501,8 +548,12 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 		case TypeGame:
 			var g models.Game
 			var ok bool
-			if g, ok = gamesByIGDB[it.ExternalID]; !ok {
-				g, ok = gamesByBarcode[it.ExternalID]
+			if g, ok = gamesByID[it.ExternalID]; !ok {
+				if g, ok = gamesByGOG[it.ExternalID]; !ok {
+					if g, ok = gamesByIGDB[it.ExternalID]; !ok {
+						g, ok = gamesByBarcode[it.ExternalID]
+					}
+				}
 			}
 			if ok {
 				entry.ArtworkPath = g.CoverPath
@@ -597,15 +648,46 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, typ, status stri
 			}
 		}
 	}
+
+	// If tag filters were provided, do an in-memory sub-filter of the enriched items.
+	// We do this here because Tags are joined from the shared metadata rows, which is
+	// very hard to query generically at the TrackingItem DB level.
+	if len(filter.Tags) > 0 {
+		var filtered []LibraryEntry
+		for _, entry := range out {
+			hasAll := true
+			for _, requiredTag := range filter.Tags {
+				found := false
+				for _, entryTag := range entry.Tags {
+					// tags in DB are stored as names, but the filter is a slug...
+					// Wait! We fetch tags by name, but we need to compare slugs.
+					// Let's assume the filter is names for now, or we can normalize it.
+					if strings.EqualFold(entryTag, requiredTag) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					hasAll = false
+					break
+				}
+			}
+			if hasAll {
+				filtered = append(filtered, entry)
+			}
+		}
+		out = filtered
+	}
+
 	return out, nil
 }
 
-// UpdateItem patches status and/or progress on the user's tracking item.
-// Status must be valid for the item's media type; progress is a
-// page number and only meaningful for books (TV progress is derived from
-// EpisodeWatch rows, never stored).
-func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress, rating *int) (*models.TrackingItem, error) {
-	if status == nil && progress == nil && rating == nil {
+// UpdateItem patches status, progress, rating, and/or physical shelf location
+// on the user's tracking item. Status must be valid for the item's media type;
+// progress is a page number and only meaningful for books (TV progress is
+// derived from EpisodeWatch rows, never stored).
+func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *string, progress, rating *int, location *string) (*models.TrackingItem, error) {
+	if status == nil && progress == nil && rating == nil && location == nil {
 		return nil, ErrEmptyUpdate
 	}
 
@@ -640,6 +722,9 @@ func (s *Service) UpdateItem(ctx context.Context, userID, itemID uint, status *s
 			return nil, fmt.Errorf("%w: rating must be between 0 and 5", ErrInvalidRating)
 		}
 		item.Rating = *rating
+	}
+	if location != nil {
+		item.Location = strings.TrimSpace(*location)
 	}
 
 	if err := s.db.WithContext(ctx).Save(item).Error; err != nil {

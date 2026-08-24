@@ -207,23 +207,27 @@ func (s *Service) enrichFromIGDB(ctx context.Context, game *models.Game) []strin
 		return nil
 	}
 
-	game.Description = detail.Summary
-	game.ReleaseDate = detail.ReleaseDate
+	if game.Description == "" {
+		game.Description = detail.Summary
+	}
+	if game.ReleaseDate == "" {
+		game.ReleaseDate = detail.ReleaseDate
+	}
 	if game.Title == "" {
 		game.Title = detail.Name
 	}
-	s.downloadCover(ctx, game, detail.CoverImageID)
+
+	// Only download cover art if currently missing
+	if game.CoverPath == "" {
+		s.downloadCover(ctx, game, detail.CoverImageID)
+	}
 
 	return detail.Tags()
 }
 
-// downloadCover best-effort caches a game's IGDB cover. The cached file is keyed
-// by the game's barcode when it has one (a scanned game) and by its IGDB id
-// otherwise (name-search / GOG game), so both identities land at a stable path.
-// A missing image id, nil image store, or failed download leaves CoverPath
-// untouched.
+// downloadCover best-effort caches a game's IGDB cover only if missing.
 func (s *Service) downloadCover(ctx context.Context, game *models.Game, imageID string) {
-	if s.enrich == nil || s.images == nil || imageID == "" {
+	if game.CoverPath != "" || s.enrich == nil || s.images == nil || imageID == "" {
 		return
 	}
 	url := s.enrich.CoverURL(imageID, "")
@@ -240,6 +244,58 @@ func (s *Service) downloadCover(ctx context.Context, game *models.Game, imageID 
 		return
 	}
 	game.CoverPath = path
+}
+
+// EnrichGOGGame enhances a GOG-synced game with high-res cover artwork, summary,
+// release date, and tags from IGDB (if configured/found) or directly from GOG CDN.
+func (s *Service) EnrichGOGGame(ctx context.Context, game *models.Game, gogCoverURL string, gogTags []string) []string {
+	var gameTags []string
+
+	// 1. Try to enrich from IGDB if enabled
+	if s.enrich != nil {
+		if game.IGDBID == 0 && game.Title != "" {
+			results, err := s.enrich.SearchGames(ctx, game.Title)
+			if err == nil && len(results) > 0 {
+				var bestMatch *igdb.SearchResult
+				for _, r := range results {
+					if strings.EqualFold(r.Name, game.Title) {
+						bestMatch = &r
+						break
+					}
+				}
+				if bestMatch == nil {
+					bestMatch = &results[0]
+				}
+				game.IGDBID = bestMatch.ID
+			}
+		}
+
+		if game.IGDBID != 0 {
+			gameTags = s.enrichFromIGDB(ctx, game)
+		}
+	}
+
+	// 2. If cover is still missing and GOG provided a cover URL, download directly from GOG CDN
+	if game.CoverPath == "" && gogCoverURL != "" && s.images != nil {
+		imgURL := gogCoverURL
+		if strings.HasPrefix(imgURL, "//") {
+			imgURL = "https:" + imgURL
+		}
+		key := "gog-" + game.GOGID
+		path, err := s.images.Fetch(ctx, s.httpClient, imgURL, "game", key)
+		if err == nil && path != "" {
+			game.CoverPath = path
+		} else if err != nil {
+			log.Printf("games: GOG direct cover download for %s failed: %v", key, err)
+		}
+	}
+
+	// 3. If no tags were found on IGDB, fallback to GOG category/tags
+	if len(gameTags) == 0 && len(gogTags) > 0 {
+		gameTags = gogTags
+	}
+
+	return gameTags
 }
 
 // upsertGame creates the Game row or refreshes an existing one, keyed by the
@@ -651,3 +707,42 @@ func normalizeBarcode(barcode string) (string, error) {
 func isUniqueViolation(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint")
 }
+
+// RefreshAllGames sweeps games missing metadata or artwork, backfilling missing summaries,
+// cover artwork, developers, and genre tags from IGDB or available sources.
+func (s *Service) RefreshAllGames(ctx context.Context) error {
+	var missingGames []models.Game
+	err := s.db.WithContext(ctx).
+		Where("cover_path = '' OR description = '' OR release_date = '' OR igdb_id = 0").
+		Find(&missingGames).Error
+	if err != nil {
+		return fmt.Errorf("games: querying missing games for refresh: %w", err)
+	}
+
+	if len(missingGames) == 0 {
+		log.Println("games: all games already have complete metadata and artwork (0 API calls needed)")
+		return nil
+	}
+
+	log.Printf("games: found %d game(s) missing metadata/artwork; enriching from IGDB...", len(missingGames))
+	tagStore := tags.NewStore(s.db)
+	updatedCount := 0
+
+	for idx, g := range missingGames {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		log.Printf("games: [%d/%d] refreshing %q...", idx+1, len(missingGames), g.Title)
+		gameTags := s.EnrichGOGGame(ctx, &g, "", nil)
+		if err := s.db.WithContext(ctx).Save(&g).Error; err == nil {
+			updatedCount++
+			if len(gameTags) > 0 {
+				_ = tagStore.Set(ctx, TypeGame, g.ID, gameTags)
+			}
+		}
+	}
+
+	log.Printf("games: refresh complete (updated %d/%d games)", updatedCount, len(missingGames))
+	return nil
+}
+

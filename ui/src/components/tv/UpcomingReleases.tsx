@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ApiError } from '../../api/client'
-import type { UpcomingItem, UpcomingMediaType } from '../../api/tv'
+import type { UpcomingItem, UpcomingMediaType } from '../../api/upcoming'
 import { useUpcoming } from '../../hooks/useUpcoming'
 import Poster from './Poster'
 
