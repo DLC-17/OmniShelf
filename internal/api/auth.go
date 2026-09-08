@@ -75,8 +75,10 @@ type loginRequest struct {
 }
 
 type userResponse struct {
-	ID       uint   `json:"id"`
-	Username string `json:"username"`
+	ID                 uint   `json:"id"`
+	Username           string `json:"username"`
+	IsAdmin            bool   `json:"isAdmin"`
+	MustChangePassword bool   `json:"mustChangePassword"`
 }
 
 // validUsername reports whether the (already trimmed) username is within
@@ -135,7 +137,12 @@ func (a *authHandler) register(c *gin.Context) {
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "registration failed")
 	default:
-		c.JSON(http.StatusCreated, userResponse{ID: user.ID, Username: user.Username})
+		c.JSON(http.StatusCreated, userResponse{
+			ID:                 user.ID,
+			Username:           user.Username,
+			IsAdmin:            user.IsAdmin,
+			MustChangePassword: user.MustChangePassword,
+		})
 	}
 }
 
@@ -172,7 +179,12 @@ func (a *authHandler) login(c *gin.Context) {
 		return
 	}
 	setSessionCookie(c, token, int(tokenTTL.Seconds()))
-	c.JSON(http.StatusOK, userResponse{ID: user.ID, Username: user.Username})
+	c.JSON(http.StatusOK, userResponse{
+		ID:                 user.ID,
+		Username:           user.Username,
+		IsAdmin:            user.IsAdmin,
+		MustChangePassword: user.MustChangePassword,
+	})
 }
 
 // logout handles POST /api/auth/logout: clears the session cookie.
@@ -194,7 +206,12 @@ func (a *authHandler) me(c *gin.Context) {
 		Error(c, http.StatusInternalServerError, CodeInternal, "lookup failed")
 		return
 	}
-	c.JSON(http.StatusOK, userResponse{ID: user.ID, Username: user.Username})
+	c.JSON(http.StatusOK, userResponse{
+		ID:                 user.ID,
+		Username:           user.Username,
+		IsAdmin:            user.IsAdmin,
+		MustChangePassword: user.MustChangePassword,
+	})
 }
 
 // registerUser consumes the invite code and creates the user inside a single
@@ -226,6 +243,14 @@ func registerUser(ctx context.Context, gdb *gorm.DB, username, password, inviteC
 			}
 			return errInviteUsed
 		}
+
+		var userCount int64
+		if err := tx.Model(&models.User{}).Count(&userCount).Error; err != nil {
+			return fmt.Errorf("counting users: %w", err)
+		}
+		// The very first registered user on the instance is automatically designated as an admin.
+		user.IsAdmin = userCount == 0
+
 		if err := tx.Create(user).Error; err != nil {
 			// glebarez/sqlite surfaces the unique index as a plain error
 			// string; db.Open does not enable GORM error translation.
@@ -268,3 +293,58 @@ func authenticate(ctx context.Context, gdb *gorm.DB, username, password string) 
 	}
 	return &user, nil
 }
+
+type changePasswordRequest struct {
+	NewPassword string `json:"newPassword"`
+}
+
+// changePassword handles POST /api/auth/change-password.
+// Any authenticated user can update their own password. It validates password length,
+// generates a new bcrypt hash, and clears must_change_password.
+func (a *authHandler) changePassword(c *gin.Context) {
+	var req changePasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, "request body must be JSON with newPassword")
+		return
+	}
+	switch {
+	case len(req.NewPassword) < minPasswordLen:
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("password must be at least %d characters", minPasswordLen))
+		return
+	case len(req.NewPassword) > maxPasswordLen:
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, fmt.Sprintf("password must be at most %d bytes", maxPasswordLen))
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcryptCost)
+	if err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "hashing password failed")
+		return
+	}
+
+	userID := CurrentUserID(c)
+	result := a.db.WithContext(c.Request.Context()).
+		Model(&models.User{}).
+		Where("id = ?", userID).
+		Updates(map[string]any{
+			"password_hash":        string(hash),
+			"must_change_password": false,
+		})
+	if result.Error != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "updating password failed")
+		return
+	}
+
+	var user models.User
+	if err := a.db.WithContext(c.Request.Context()).First(&user, userID).Error; err != nil {
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading updated user failed")
+		return
+	}
+	c.JSON(http.StatusOK, userResponse{
+		ID:                 user.ID,
+		Username:           user.Username,
+		IsAdmin:            user.IsAdmin,
+		MustChangePassword: user.MustChangePassword,
+	})
+}
+

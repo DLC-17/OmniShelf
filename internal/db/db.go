@@ -50,6 +50,10 @@ func Open(dataDir string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("migrating stats indexes: %w", err)
 	}
 
+	if err := migrateAdminBootstrap(gdb); err != nil {
+		return nil, fmt.Errorf("migrating admin bootstrap: %w", err)
+	}
+
 	return gdb, nil
 }
 
@@ -93,6 +97,30 @@ func migrateStatsIndexes(gdb *gorm.DB) error {
 		if err := gdb.Exec(s).Error; err != nil {
 			log.Printf("db: skipping stats index migration: %v", err)
 		}
+	}
+	return nil
+}
+
+// migrateAdminBootstrap ensures at least one administrator exists. If no user has
+// is_admin = true (e.g. after schema migration on an existing database), the lowest-ID
+// user is promoted. Safe and idempotent on every startup.
+func migrateAdminBootstrap(gdb *gorm.DB) error {
+	var adminCount int64
+	if err := gdb.Model(&models.User{}).Where("is_admin = ?", true).Count(&adminCount).Error; err != nil {
+		return fmt.Errorf("counting admins: %w", err)
+	}
+	if adminCount > 0 {
+		return nil
+	}
+
+	result := gdb.Model(&models.User{}).
+		Where("id = (SELECT MIN(id) FROM users)").
+		Update("is_admin", true)
+	if result.Error != nil {
+		return fmt.Errorf("promoting first user to admin: %w", result.Error)
+	}
+	if result.RowsAffected > 0 {
+		log.Print("db: promoted lowest-ID user to administrator (no admin existed)")
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import { useTheme } from '../theme/ThemeContext'
 import { connectGOG, disconnectGOG, getGOGAuthURL, getGOGStatus, syncGOGLibrary } from '../api/gog'
 import type { GOGStatus } from '../api/gog'
 import Stats from './Stats'
+import AdminUserManagement from '../components/settings/AdminUserManagement'
 
 /**
  * Combined Profile & Settings page reached by clicking the user in the navbar.
@@ -569,6 +570,9 @@ export default function Settings() {
           Import data
         </Link>
       </div>
+
+      {/* Admin User Management Section */}
+      {user?.isAdmin && <AdminUserManagement />}
     </section>
   )
 }

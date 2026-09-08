@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/davidlc1229/omnishelf/internal/config"
+	"github.com/davidlc1229/omnishelf/internal/models"
 )
 
 // CookieName is the session cookie holding the JWT
@@ -46,6 +47,7 @@ func RegisterRoutes(r *gin.Engine, gdb *gorm.DB, cfg *config.Config) *gin.Router
 	protected := r.Group("/api", AuthRequired(secret))
 	protected.POST("/auth/logout", a.logout)
 	protected.GET("/auth/me", a.me)
+	protected.POST("/auth/change-password", a.changePassword)
 	return protected
 }
 
@@ -143,3 +145,22 @@ func setSessionCookie(c *gin.Context, token string, maxAge int) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(CookieName, token, maxAge, "/", "", false, true)
 }
+
+// AdminRequired verifies that the authenticated user has administrator privileges.
+// Must be used on route groups that are already guarded by AuthRequired.
+func AdminRequired(gdb *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := CurrentUserID(c)
+		var user models.User
+		if err := gdb.WithContext(c.Request.Context()).Select("is_admin").First(&user, userID).Error; err != nil {
+			AbortError(c, http.StatusForbidden, CodeForbidden, "administrator privileges required")
+			return
+		}
+		if !user.IsAdmin {
+			AbortError(c, http.StatusForbidden, CodeForbidden, "administrator privileges required")
+			return
+		}
+		c.Next()
+	}
+}
+

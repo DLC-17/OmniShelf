@@ -3,6 +3,8 @@ import { ApiError, request } from './client'
 export interface User {
   id: number
   username: string
+  isAdmin: boolean
+  mustChangePassword: boolean
 }
 
 export function login(username: string, password: string): Promise<void> {
@@ -21,6 +23,13 @@ export function register(username: string, password: string, inviteCode: string)
 
 export function logout(): Promise<void> {
   return request<void>('/api/auth/logout', { method: 'POST' })
+}
+
+export function changePassword(newPassword: string): Promise<User> {
+  return request<User>('/api/auth/change-password', {
+    method: 'POST',
+    body: { newPassword },
+  })
 }
 
 /** Returns the current user, or null when not authenticated (401). */

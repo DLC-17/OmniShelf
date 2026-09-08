@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import CommandPalette from './CommandPalette'
+import ForcePasswordChangeModal from './auth/ForcePasswordChangeModal'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   isActive ? 'nav-link active' : 'nav-link'
@@ -56,6 +57,7 @@ export default function Layout() {
         <Outlet />
       </main>
       <CommandPalette isOpen={isPaletteOpen} onClose={() => setIsPaletteOpen(false)} />
+      {user?.mustChangePassword && <ForcePasswordChangeModal />}
     </div>
   )
 }

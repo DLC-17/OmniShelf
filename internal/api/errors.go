@@ -16,6 +16,7 @@ const (
 	CodeUnauthorized   = "unauthorized"
 	CodeRateLimited    = "rate_limited"
 	CodeInternal       = "internal_error"
+	CodeForbidden      = "forbidden"
 )
 
 // Error writes the uniform API error envelope

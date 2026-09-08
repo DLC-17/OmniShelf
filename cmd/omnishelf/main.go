@@ -54,8 +54,11 @@ func main() {
 		case "refresh":
 			runRefresh(os.Args[2:])
 			return
+		case "reset-password":
+			runResetPassword(os.Args[2:])
+			return
 		default:
-			log.Printf("unknown subcommand %q (available: invite, refresh)", os.Args[1])
+			log.Printf("unknown subcommand %q (available: invite, refresh, reset-password)", os.Args[1])
 			os.Exit(1)
 		}
 	}
@@ -157,6 +160,7 @@ func runServer() error {
 	api.RegisterFeedRoutes(protected, gdb)
 	api.RegisterUpcomingRoutes(protected, gdb)
 	api.RegisterUserRoutes(protected, gdb)
+	api.RegisterAdminRoutes(protected, gdb)
 	api.RegisterThemeRoutes(protected, gdb)
 	api.RegisterCollectionRoutes(protected, gdb)
 	api.RegisterStatsRoutes(protected, gdb)

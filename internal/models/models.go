@@ -9,11 +9,13 @@ import (
 
 // User is an account on the instance.
 type User struct {
-	ID           uint   `gorm:"primaryKey"`
-	Username     string `gorm:"unique;not null"`
-	PasswordHash string `gorm:"not null" json:"-"`
-	CreatedAt    time.Time
-	Theme        string   `gorm:"type:text;default:'dark-espresso'" json:"theme"`
+	ID                 uint      `gorm:"primaryKey"`
+	Username           string    `gorm:"unique;not null"`
+	PasswordHash       string    `gorm:"not null" json:"-"`
+	IsAdmin            bool      `gorm:"not null;default:false" json:"isAdmin"`
+	MustChangePassword bool      `gorm:"not null;default:false" json:"mustChangePassword"`
+	CreatedAt          time.Time
+	Theme              string    `gorm:"type:text;default:'dark-espresso'" json:"theme"`
 }
 
 // InviteCode is a single-use registration code.
