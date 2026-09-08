@@ -46,6 +46,10 @@ func Open(dataDir string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("migrating game identity: %w", err)
 	}
 
+	if err := migrateStatsIndexes(gdb); err != nil {
+		return nil, fmt.Errorf("migrating stats indexes: %w", err)
+	}
+
 	return gdb, nil
 }
 
@@ -69,11 +73,27 @@ func migrateGameIdentity(gdb *gorm.DB) error {
 	stmts := []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_games_igdb_id ON games(igdb_id) WHERE igdb_id <> 0`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_games_barcode ON games(barcode) WHERE barcode <> ''`,
+		`DELETE FROM media_relations WHERE source_type = 'GAME' AND target_type = 'GAME'`,
 	}
 	for _, s := range stmts {
 		if err := gdb.Exec(s).Error; err != nil {
-			log.Printf("db: skipping game identity index (existing data conflict?): %v", err)
+			log.Printf("db: skipping game identity migration: %v", err)
 		}
 	}
 	return nil
 }
+
+// migrateStatsIndexes ensures indexes supporting stats and annual wrapped aggregations exist.
+func migrateStatsIndexes(gdb *gorm.DB) error {
+	stmts := []string{
+		`CREATE INDEX IF NOT EXISTS idx_episode_watches_user_watched ON episode_watches(user_id, watched_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_tracking_items_user_type_status_updated ON tracking_items(user_id, type, status, updated_at)`,
+	}
+	for _, s := range stmts {
+		if err := gdb.Exec(s).Error; err != nil {
+			log.Printf("db: skipping stats index migration: %v", err)
+		}
+	}
+	return nil
+}
+

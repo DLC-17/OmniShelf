@@ -190,15 +190,26 @@ type MovieSearchResponse struct {
 	TotalResults int           `json:"total_results"`
 }
 
+// MovieCollection describes the collection/franchise a movie belongs to.
+type MovieCollection struct {
+	ID           int           `json:"id"`
+	Name         string        `json:"name"`
+	Overview     string        `json:"overview"`
+	PosterPath   string        `json:"poster_path"`
+	BackdropPath string        `json:"backdrop_path"`
+	Parts        []MovieResult `json:"parts"`
+}
+
 // Movie is the TMDB movie detail payload.
 type Movie struct {
-	ID          int           `json:"id"`
-	Title       string        `json:"title"`
-	Overview    string        `json:"overview"`
-	Status      string        `json:"status"` // "Released", "Post Production", ...
-	ReleaseDate string        `json:"release_date"`
-	PosterPath  string        `json:"poster_path"`
-	Keywords    movieKeywords `json:"keywords"` // from append_to_response=keywords
+	ID                  int              `json:"id"`
+	Title               string           `json:"title"`
+	Overview            string           `json:"overview"`
+	Status              string           `json:"status"` // "Released", "Post Production", ...
+	ReleaseDate         string           `json:"release_date"`
+	PosterPath          string           `json:"poster_path"`
+	BelongsToCollection *MovieCollection `json:"belongs_to_collection"`
+	Keywords            movieKeywords    `json:"keywords"` // from append_to_response=keywords
 }
 
 func (m *Movie) TagNames() []string {
@@ -235,10 +246,28 @@ func (c *Client) GetMovie(ctx context.Context, id int) (*Movie, error) {
 	return &out, nil
 }
 
+// GetCollection fetches a TMDB movie collection by its collection ID.
+func (c *Client) GetCollection(ctx context.Context, collectionID int) (*MovieCollection, error) {
+	var out MovieCollection
+	if err := c.get(ctx, fmt.Sprintf("/collection/%d", collectionID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // MovieRecommendations returns TMDB's "recommended" movies for a given movie.
 func (c *Client) MovieRecommendations(ctx context.Context, movieID int) (*MovieSearchResponse, error) {
 	var out MovieSearchResponse
 	if err := c.get(ctx, fmt.Sprintf("/movie/%d/recommendations", movieID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SimilarMovies returns TMDB's "similar" movies for a given movie.
+func (c *Client) SimilarMovies(ctx context.Context, movieID int) (*MovieSearchResponse, error) {
+	var out MovieSearchResponse
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d/similar", movieID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -270,6 +299,15 @@ func (c *Client) GetShow(ctx context.Context, id int) (*Show, error) {
 func (c *Client) Recommendations(ctx context.Context, showID int) (*SearchResponse, error) {
 	var out SearchResponse
 	if err := c.get(ctx, fmt.Sprintf("/tv/%d/recommendations", showID), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SimilarTV returns TMDB's "similar" TV shows for a given show.
+func (c *Client) SimilarTV(ctx context.Context, showID int) (*SearchResponse, error) {
+	var out SearchResponse
+	if err := c.get(ctx, fmt.Sprintf("/tv/%d/similar", showID), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

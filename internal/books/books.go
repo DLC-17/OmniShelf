@@ -321,16 +321,19 @@ type LibraryFilter struct {
 	Location   string
 	Tags       []string // slugs
 	Collection string   // user collection slug
+	Search     string   // free-text search query across title, author, artist
+	After      uint     // cursor: tracking_item ID after which to fetch
+	Limit      int      // max items to return per page
 }
 
 // ListItems returns the user's tracking items, filtered by the provided criteria,
-// newest activity first.
-func (s *Service) ListItems(ctx context.Context, userID uint, filter LibraryFilter) ([]models.TrackingItem, error) {
+// total matching count, whether more items exist, and any error.
+func (s *Service) ListItems(ctx context.Context, userID uint, filter LibraryFilter) ([]models.TrackingItem, int64, bool, error) {
 	if filter.Type != "" && filter.Type != TypeTV && filter.Type != TypeBook && filter.Type != TypeGame && filter.Type != TypeMovie && filter.Type != TypeMusic && filter.Type != TypeCard {
-		return nil, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, filter.Type)
+		return nil, 0, false, fmt.Errorf("%w: unknown type %q", ErrInvalidFilter, filter.Type)
 	}
 	if filter.Status != "" && !isKnownStatus(filter.Status) {
-		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidFilter, filter.Status)
+		return nil, 0, false, fmt.Errorf("%w: unknown status %q", ErrInvalidFilter, filter.Status)
 	}
 
 	q := s.db.WithContext(ctx).Where("tracking_items.user_id = ?", userID)
@@ -352,11 +355,93 @@ func (s *Service) ListItems(ctx context.Context, userID uint, filter LibraryFilt
 			Where("user_collections.slug = ?", filter.Collection)
 	}
 
-	items := []models.TrackingItem{}
-	if err := q.Order("tracking_items.title COLLATE NOCASE, tracking_items.id").Find(&items).Error; err != nil {
-		return nil, fmt.Errorf("listing items for user %d: %w", userID, err)
+	if filter.Search != "" {
+		pattern := "%" + filter.Search + "%"
+		q = q.Where(
+			"tracking_items.title LIKE ? OR tracking_items.external_id IN ("+
+				"SELECT isbn13 FROM books WHERE title LIKE ? OR authors LIKE ? "+
+				"UNION SELECT external_id FROM albums WHERE artist LIKE ? OR title LIKE ?"+
+				"UNION SELECT CAST(id AS TEXT) FROM games WHERE developer LIKE ? OR publisher LIKE ?"+
+				"UNION SELECT CAST(tmdb_id AS TEXT) FROM movies WHERE title LIKE ? OR overview LIKE ?"+
+				"UNION SELECT external_id FROM cards WHERE set_name LIKE ? OR name LIKE ?"+
+				")",
+			pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern,
+		)
 	}
-	return items, nil
+
+	// Tag filtering: resolve tag slugs to matching external_id sets BEFORE
+	// pagination so totalCount and hasMore are accurate.
+	if len(filter.Tags) > 0 && filter.Type != "" {
+		store := tags.NewStore(s.db)
+		// For each required tag, get the set of cache-row IDs that carry it.
+		// Intersect by keeping only IDs present in every tag's result set.
+		var matchingMediaIDs []uint
+		for i, slug := range filter.Tags {
+			ids, err := store.MediaIDs(ctx, filter.Type, slug)
+			if err != nil {
+				return nil, 0, false, fmt.Errorf("resolving tag %q: %w", slug, err)
+			}
+			if i == 0 {
+				matchingMediaIDs = ids
+			} else {
+				matchingMediaIDs = intersectUintSlices(matchingMediaIDs, ids)
+			}
+			if len(matchingMediaIDs) == 0 {
+				// No items can match all tags — short-circuit.
+				return []models.TrackingItem{}, 0, false, nil
+			}
+		}
+		// Map cache-row PKs back to external_id values so we can filter
+		// tracking_items. The mapping is type-specific:
+		extIDs, err := s.mediaIDsToExternalIDs(ctx, filter.Type, matchingMediaIDs)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		if len(extIDs) == 0 {
+			return []models.TrackingItem{}, 0, false, nil
+		}
+		q = q.Where("tracking_items.external_id IN ?", extIDs)
+	}
+
+	var totalCount int64
+	if err := q.Session(&gorm.Session{}).Model(&models.TrackingItem{}).Count(&totalCount).Error; err != nil {
+		return nil, 0, false, fmt.Errorf("counting items for user %d: %w", userID, err)
+	}
+
+	if filter.After > 0 {
+		var cursorItem models.TrackingItem
+		if err := s.db.WithContext(ctx).Select("title, id").First(&cursorItem, filter.After).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, 0, false, fmt.Errorf("%w: cursor item %d no longer exists", ErrInvalidFilter, filter.After)
+			}
+			return nil, 0, false, fmt.Errorf("looking up cursor item %d: %w", filter.After, err)
+		}
+		q = q.Where(
+			"(tracking_items.title COLLATE NOCASE > ? OR (tracking_items.title COLLATE NOCASE = ? AND tracking_items.id > ?))",
+			cursorItem.Title, cursorItem.Title, cursorItem.ID,
+		)
+	}
+
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	items := []models.TrackingItem{}
+	if err := q.Order("tracking_items.title COLLATE NOCASE, tracking_items.id").Limit(limit + 1).Find(&items).Error; err != nil {
+		return nil, 0, false, fmt.Errorf("listing items for user %d: %w", userID, err)
+	}
+
+	hasMore := false
+	if len(items) > limit {
+		hasMore = true
+		items = items[:limit]
+	}
+
+	return items, totalCount, hasMore, nil
 }
 
 // LibraryEntry is a tracking item enriched with the artwork and (for books)
@@ -377,12 +462,135 @@ type LibraryEntry struct {
 	Ownership   []string // user-selected ownership formats (games/music); never nil
 }
 
-// ListLibrary is ListItems plus the cached artwork and book metadata, joined
-// in from the shared Show/Book caches with two batch queries.
-func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFilter) ([]LibraryEntry, error) {
-	items, err := s.ListItems(ctx, userID, filter)
+// LibraryPage represents a paginated slice of library entries.
+type LibraryPage struct {
+	Items      []LibraryEntry `json:"items"`
+	TotalCount int64          `json:"totalCount"`
+	HasMore    bool           `json:"hasMore"`
+}
+
+// ListLibrary is ListItems plus cached artwork and metadata, joined
+// in from the shared caches in batches. Descriptions in list responses are truncated to 200 chars.
+func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFilter) (*LibraryPage, error) {
+	items, totalCount, hasMore, err := s.ListItems(ctx, userID, filter)
 	if err != nil {
 		return nil, err
+	}
+
+	out, err := s.enrichEntries(ctx, userID, items, true)
+	if err != nil {
+		return nil, err
+	}
+
+	return &LibraryPage{
+		Items:      out,
+		TotalCount: totalCount,
+		HasMore:    hasMore,
+	}, nil
+}
+
+// GetLibraryItem returns a single enriched library entry by item ID with full untruncated description.
+func (s *Service) GetLibraryItem(ctx context.Context, userID, itemID uint) (*LibraryEntry, error) {
+	item, err := s.userItem(ctx, userID, itemID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := s.enrichEntries(ctx, userID, []models.TrackingItem{*item}, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		return nil, ErrItemNotFound
+	}
+	return &entries[0], nil
+}
+
+// intersectUintSlices returns elements present in both sorted slices.
+func intersectUintSlices(a, b []uint) []uint {
+	set := make(map[uint]struct{}, len(b))
+	for _, v := range b {
+		set[v] = struct{}{}
+	}
+	var out []uint
+	for _, v := range a {
+		if _, ok := set[v]; ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// mediaIDsToExternalIDs maps cache-row primary keys back to the external_id
+// values stored on tracking_items. The mapping is type-specific because each
+// media type uses a different cache table and key column.
+func (s *Service) mediaIDsToExternalIDs(ctx context.Context, mediaType string, mediaIDs []uint) ([]string, error) {
+	if len(mediaIDs) == 0 {
+		return nil, nil
+	}
+	var extIDs []string
+	switch mediaType {
+	case TypeTV:
+		// Show.ID → Show.TMDBID (int) → tracking_items.external_id is string(TMDBID)
+		var tmdbIDs []int
+		if err := s.db.WithContext(ctx).Model(&models.Show{}).Where("id IN ?", mediaIDs).Pluck("tmdb_id", &tmdbIDs).Error; err != nil {
+			return nil, fmt.Errorf("mapping show ids to tmdb_id: %w", err)
+		}
+		for _, id := range tmdbIDs {
+			extIDs = append(extIDs, strconv.Itoa(id))
+		}
+	case TypeBook:
+		// Book.ID → Book.ISBN13
+		if err := s.db.WithContext(ctx).Model(&models.Book{}).Where("id IN ?", mediaIDs).Pluck("isbn13", &extIDs).Error; err != nil {
+			return nil, fmt.Errorf("mapping book ids to isbn13: %w", err)
+		}
+	case TypeGame:
+		// Game.ID → external_id can be game.ID, game.IGDBID, game.GOGID, or game.Barcode;
+		// tracking_items use various formats. Safest: include all possible keys.
+		var games []models.Game
+		if err := s.db.WithContext(ctx).Where("id IN ?", mediaIDs).Find(&games).Error; err != nil {
+			return nil, fmt.Errorf("mapping game ids: %w", err)
+		}
+		seen := make(map[string]struct{})
+		for _, g := range games {
+			for _, key := range []string{
+				strconv.FormatUint(uint64(g.ID), 10),
+				strconv.Itoa(g.IGDBID),
+				g.GOGID,
+				"gog:" + g.GOGID,
+				g.Barcode,
+			} {
+				if key != "" && key != "0" {
+					if _, ok := seen[key]; !ok {
+						seen[key] = struct{}{}
+						extIDs = append(extIDs, key)
+					}
+				}
+			}
+		}
+	case TypeMovie:
+		var tmdbIDs []int
+		if err := s.db.WithContext(ctx).Model(&models.Movie{}).Where("id IN ?", mediaIDs).Pluck("tmdb_id", &tmdbIDs).Error; err != nil {
+			return nil, fmt.Errorf("mapping movie ids to tmdb_id: %w", err)
+		}
+		for _, id := range tmdbIDs {
+			extIDs = append(extIDs, strconv.Itoa(id))
+		}
+	case TypeMusic:
+		if err := s.db.WithContext(ctx).Model(&models.Album{}).Where("id IN ?", mediaIDs).Pluck("external_id", &extIDs).Error; err != nil {
+			return nil, fmt.Errorf("mapping album ids to external_id: %w", err)
+		}
+	case TypeCard:
+		if err := s.db.WithContext(ctx).Model(&models.Card{}).Where("id IN ?", mediaIDs).Pluck("external_id", &extIDs).Error; err != nil {
+			return nil, fmt.Errorf("mapping card ids to external_id: %w", err)
+		}
+	}
+	return extIDs, nil
+}
+
+// enrichEntries batch-loads cached metadata, tags, and ownership for the given tracking items.
+func (s *Service) enrichEntries(ctx context.Context, userID uint, items []models.TrackingItem, truncateDescription bool) ([]LibraryEntry, error) {
+	if len(items) == 0 {
+		return []LibraryEntry{}, nil
 	}
 
 	// Collect the external IDs to look up per media type.
@@ -498,7 +706,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 		}
 	}
 
-	// Load watched episode counts for TV items so TV shows with 0 watched episodes are identifiable as Not Started
+	// Load watched episode counts for TV items
 	tvWatchesByShowID := map[uint]int{}
 	if len(shows) > 0 {
 		var watchCounts []struct {
@@ -522,8 +730,6 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 	}
 
 	out := make([]LibraryEntry, 0, len(items))
-	// mediaKey records the shared cache-row primary key backing each entry, so
-	// its source-derived tags can be batch-loaded per media type below.
 	mediaKey := make([]uint, len(items))
 	tagIDsByType := map[string][]uint{}
 	for i := range items {
@@ -576,12 +782,6 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 		case TypeCard:
 			if cd, ok := cardsByExtID[it.ExternalID]; ok {
 				entry.ArtworkPath = cd.CoverPath
-				// Cards reuse the games' Platform slot for their set (name
-				// when the catalog provides one, else the printed set code),
-				// the music Artist slot for the illustrator credit, and
-				// Description for the full type/set/artist line. SetCode is
-				// the display collector code ("10/182", leading zeros
-				// dropped) the grid shows and the UI groups sets by.
 				entry.Platform = cd.SetName
 				if entry.Platform == "" {
 					entry.Platform = cd.SetCode
@@ -598,7 +798,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 		out = append(out, entry)
 	}
 
-	// Attach source-derived tags with one batch query per media type.
+	// Attach source-derived tags
 	store := tags.NewStore(s.db)
 	tagsByType := map[string]map[uint][]string{}
 	for typ, ids := range tagIDsByType {
@@ -619,10 +819,7 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 		}
 	}
 
-	// Attach user-selected ownership formats. Unlike tags (keyed by the shared
-	// cache row), ownership is per tracking item, so it batches by TrackingItem.ID
-	// and needs no cache-row join. Only media types with a fixed format set carry
-	// ownership; today that is GAME (#11 adds MUSIC).
+	// Attach user-selected ownership formats
 	ownItemIDs := map[string][]uint{}
 	for i := range out {
 		switch out[i].Item.Type {
@@ -649,34 +846,13 @@ func (s *Service) ListLibrary(ctx context.Context, userID uint, filter LibraryFi
 		}
 	}
 
-	// If tag filters were provided, do an in-memory sub-filter of the enriched items.
-	// We do this here because Tags are joined from the shared metadata rows, which is
-	// very hard to query generically at the TrackingItem DB level.
-	if len(filter.Tags) > 0 {
-		var filtered []LibraryEntry
-		for _, entry := range out {
-			hasAll := true
-			for _, requiredTag := range filter.Tags {
-				found := false
-				for _, entryTag := range entry.Tags {
-					// tags in DB are stored as names, but the filter is a slug...
-					// Wait! We fetch tags by name, but we need to compare slugs.
-					// Let's assume the filter is names for now, or we can normalize it.
-					if strings.EqualFold(entryTag, requiredTag) {
-						found = true
-						break
-					}
-				}
-				if !found {
-					hasAll = false
-					break
-				}
-			}
-			if hasAll {
-				filtered = append(filtered, entry)
+	if truncateDescription {
+		for i := range out {
+			runes := []rune(out[i].Description)
+			if len(runes) > 200 {
+				out[i].Description = string(runes[:200]) + "…"
 			}
 		}
-		out = filtered
 	}
 
 	return out, nil

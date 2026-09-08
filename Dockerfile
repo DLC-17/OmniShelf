@@ -41,5 +41,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
         wget -qO- http://127.0.0.1:${OMNISHELF_PORT:-8080}/api/health || exit 1; \
       fi
 
+USER omnishelf:omnishelf
+
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["omnishelf"]

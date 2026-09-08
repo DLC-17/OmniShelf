@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -8,7 +9,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/davidlc1229/omnishelf/internal/games"
+	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/models"
+	"github.com/davidlc1229/omnishelf/internal/related"
 )
 
 // Machine error codes for the game endpoints.
@@ -18,13 +21,19 @@ const (
 
 // gamesHandler serves the game scan/track and name-search/add endpoints.
 type gamesHandler struct {
-	svc *games.Service
+	svc        *games.Service
+	relatedSvc *related.Service
+	igdbClient *igdb.Client
 }
 
 // RegisterGameRoutes attaches the game endpoints to the JWT-protected /api
 // group returned by RegisterRoutes.
-func RegisterGameRoutes(grp *gin.RouterGroup, svc *games.Service) {
-	h := &gamesHandler{svc: svc}
+func RegisterGameRoutes(grp *gin.RouterGroup, svc *games.Service, relatedSvc *related.Service, igdbClient *igdb.Client) {
+	h := &gamesHandler{
+		svc:        svc,
+		relatedSvc: relatedSvc,
+		igdbClient: igdbClient,
+	}
 	grp.POST("/games/scan", h.scan)
 	grp.POST("/games/track", h.track)
 	grp.GET("/games/search", h.search)
@@ -189,6 +198,11 @@ func (h *gamesHandler) add(c *gin.Context) {
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "adding game failed")
 	default:
+		if h.relatedSvc != nil && h.igdbClient != nil && game != nil {
+			go func() {
+				_ = h.relatedSvc.SyncIGDBGameRelations(context.Background(), h.igdbClient, game.ID, game.IGDBID)
+			}()
+		}
 		c.JSON(http.StatusCreated, gin.H{
 			"game": toGameResponse(game),
 			"item": toItemResponse(item),

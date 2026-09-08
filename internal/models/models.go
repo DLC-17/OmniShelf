@@ -1,13 +1,17 @@
 // Package models defines the GORM data models for OmniShelf.
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"math"
+	"time"
+)
 
 // User is an account on the instance.
 type User struct {
 	ID           uint   `gorm:"primaryKey"`
 	Username     string `gorm:"unique;not null"`
-	PasswordHash string `gorm:"not null"`
+	PasswordHash string `gorm:"not null" json:"-"`
 	CreatedAt    time.Time
 	Theme        string   `gorm:"type:text;default:'dark-espresso'" json:"theme"`
 }
@@ -211,9 +215,26 @@ type ShowAlias struct {
 type RejectedRec struct {
 	ID         uint   `gorm:"primaryKey"`
 	UserID     uint   `gorm:"not null;index:idx_user_rec,unique"`
-	Type       string `gorm:"type:varchar(10);not null;index:idx_user_rec,unique"` // "TV" | "BOOK"
+	Type       string `gorm:"type:varchar(10);not null;index:idx_user_rec,unique"` // "TV" | "BOOK" | "MOVIE" | "GAME"
 	ExternalID string `gorm:"not null;index:idx_user_rec,unique"`
 	CreatedAt  time.Time
+}
+
+// StoredRecommendation persists recommendations for a user and source media item.
+type StoredRecommendation struct {
+	ID          uint      `gorm:"primaryKey"`
+	UserID      uint      `gorm:"not null;index:idx_user_source_rec"`
+	SourceType  string    `gorm:"type:varchar(10);not null;index:idx_user_source_rec"`
+	SourceID    string    `gorm:"not null;index:idx_user_source_rec"`
+	TargetType  string    `gorm:"type:varchar(10);not null"`
+	TargetID    string    `gorm:"not null"`
+	Title       string    `gorm:"not null"`
+	ArtworkPath string    `gorm:"type:text"`
+	Year        int
+	Overview    string    `gorm:"type:text"`
+	Score       float64
+	MatchReason string
+	CreatedAt   time.Time
 }
 
 // BookNote is one timestamped journal entry a user attaches to a book they
@@ -396,6 +417,58 @@ type UserGOGAccount struct {
 	UpdatedAt    time.Time
 }
 
+// MediaEmbedding stores a vector embedding for semantic search / vibe discovery.
+type MediaEmbedding struct {
+	ID        uint      `gorm:"primaryKey"`
+	MediaType string    `gorm:"type:varchar(10);not null;uniqueIndex:idx_media_embed"` // "TV", "MOVIE", "BOOK", "GAME", "MUSIC", "CARD"
+	MediaID   uint      `gorm:"not null;uniqueIndex:idx_media_embed"`
+	Embedding string    `gorm:"type:text;not null"` // JSON-encoded []float32
+	Model     string    `gorm:"type:varchar(64);not null"`
+	UpdatedAt time.Time
+}
+
+// GetVector parses the JSON-encoded embedding string into a float32 slice.
+func (m *MediaEmbedding) GetVector() ([]float32, error) {
+	if m.Embedding == "" {
+		return nil, nil
+	}
+	var vec []float32
+	if err := json.Unmarshal([]byte(m.Embedding), &vec); err != nil {
+		return nil, err
+	}
+	return vec, nil
+}
+
+// SetVector serializes a float32 slice into the JSON embedding string.
+func (m *MediaEmbedding) SetVector(vec []float32) error {
+	data, err := json.Marshal(vec)
+	if err != nil {
+		return err
+	}
+	m.Embedding = string(data)
+	return nil
+}
+
+// CosineSimilarity computes the cosine similarity between two float32 slices.
+// Returns 0 if lengths mismatch, either slice is empty, or either vector has 0 magnitude.
+func CosineSimilarity(a, b []float32) float64 {
+	if len(a) == 0 || len(b) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		ai := float64(a[i])
+		bi := float64(b[i])
+		dot += ai * bi
+		normA += ai * ai
+		normB += bi * bi
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(normA) * math.Sqrt(normB))
+}
+
 // All returns every model for AutoMigrate, in dependency order.
 func All() []any {
 	return []any{
@@ -416,6 +489,7 @@ func All() []any {
 		&ImportJob{},
 		&SyncLog{},
 		&RejectedRec{},
+		&StoredRecommendation{},
 		&ShowAlias{},
 		&Tag{},
 		&MediaTag{},
@@ -428,5 +502,6 @@ func All() []any {
 		&ShareToken{},
 		&LocalFileMapping{},
 		&UserGOGAccount{},
+		&MediaEmbedding{},
 	}
 }

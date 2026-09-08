@@ -180,13 +180,18 @@ func (c *Client) Configured() bool {
 
 // Game is the subset of IGDB game metadata we consume.
 type Game struct {
-	ID           int
-	Name         string
-	Summary      string
-	CoverImageID string   // IGDB image_id, e.g. "co3p2d"; "" when no cover
-	ReleaseDate  string   // "YYYY-MM-DD" from first_release_date; "" when unknown
-	Genres       []string // IGDB genre names, e.g. "Role-playing (RPG)"; may be empty
-	Keywords     []string // IGDB keyword names; may be empty
+	ID             int
+	Name           string
+	Summary        string
+	CoverImageID   string   // IGDB image_id, e.g. "co3p2d"; "" when no cover
+	ReleaseDate    string   // "YYYY-MM-DD" from first_release_date; "" when unknown
+	Genres         []string // IGDB genre names, e.g. "Role-playing (RPG)"; may be empty
+	Keywords       []string // IGDB keyword names; may be empty
+	CollectionID   int      // IGDB collection ID (exact series)
+	CollectionName string   // IGDB collection / series name
+	CollectionGameIDs []int // IGDB IDs belonging to this exact collection
+	Franchises     []string // IGDB franchise names
+	RemakeIDs      []int    // IDs of remakes or parent games
 }
 
 // Tags returns the game's source-derived tags — its genres followed by its
@@ -212,15 +217,22 @@ type gamePayload struct {
 	Cover            struct {
 		ImageID string `json:"image_id"`
 	} `json:"cover"`
-	Genres   []named `json:"genres"`
-	Keywords []named `json:"keywords"`
+	Genres     []named `json:"genres"`
+	Keywords   []named `json:"keywords"`
+	Collection struct {
+		ID    int    `json:"id"`
+		Name  string `json:"name"`
+		Games []int  `json:"games"`
+	} `json:"collection"`
+	Franchises []named `json:"franchises"`
+	Remakes    []int   `json:"remakes"`
 }
 
 // GetGame fetches a game's name, summary and cover image id by its IGDB id.
 // A missing game yields (nil, nil) — not an error — so callers can keep the
 // ScanDex title/platform without a cover or summary.
 func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
-	body := fmt.Sprintf("fields name,summary,first_release_date,cover.image_id,genres.name,keywords.name; where id = %d;", igdbID)
+	body := fmt.Sprintf("fields name,summary,first_release_date,cover.image_id,genres.name,keywords.name,collection.id,collection.name,collection.games,franchises.name,remakes; where id = %d;", igdbID)
 	raw, err := c.queryAPI(ctx, "/games", body)
 	if err != nil {
 		return nil, err
@@ -240,13 +252,18 @@ func (c *Client) GetGame(ctx context.Context, igdbID int) (*Game, error) {
 		releaseDate = time.Unix(p.FirstReleaseDate, 0).UTC().Format("2006-01-02")
 	}
 	return &Game{
-		ID:           p.ID,
-		Name:         p.Name,
-		Summary:      p.Summary,
-		CoverImageID: p.Cover.ImageID,
-		ReleaseDate:  releaseDate,
-		Genres:       names(p.Genres),
-		Keywords:     names(p.Keywords),
+		ID:                p.ID,
+		Name:              p.Name,
+		Summary:           p.Summary,
+		CoverImageID:      p.Cover.ImageID,
+		ReleaseDate:       releaseDate,
+		Genres:            names(p.Genres),
+		Keywords:          names(p.Keywords),
+		CollectionID:      p.Collection.ID,
+		CollectionName:    p.Collection.Name,
+		CollectionGameIDs: p.Collection.Games,
+		Franchises:        names(p.Franchises),
+		RemakeIDs:         p.Remakes,
 	}, nil
 }
 

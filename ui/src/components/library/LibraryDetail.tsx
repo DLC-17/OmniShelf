@@ -14,7 +14,7 @@ import {
 import type { ItemStatus, LibraryItem } from '../../api/library'
 import { formatUsd } from '../../lib/currency'
 import { useRefreshArtwork, useUploadArtwork } from '../../hooks/useArtwork'
-import { useDeleteItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
+import { useDeleteItem, useLibraryItem, useUpdateItem, useUpdateOwnership } from '../../hooks/useLibrary'
 import { useRequestSeerrMedia, useSeerrConfigured, useSeerrStatus } from '../../hooks/useSeerr'
 import OwnershipSelect from '../common/OwnershipSelect'
 import EpisodeList from '../tv/EpisodeList'
@@ -22,10 +22,15 @@ import Poster from '../tv/Poster'
 import BookNotes from './BookNotes'
 import RatingStars from './RatingStars'
 import PriceSparkline from '../cards/PriceSparkline'
+import RelatedTab from './RelatedTab'
+import RecommendedTab from './RecommendedTab'
+import { useRecommendedMedia, useRelatedMedia } from '../../hooks/useRelated'
 
 interface LibraryDetailProps {
   item: LibraryItem
+  existingItems?: LibraryItem[]
   onClose: () => void
+  onSelectItem?: (item: LibraryItem) => void
 }
 
 /**
@@ -34,7 +39,7 @@ interface LibraryDetailProps {
  * offers a self-rating, an inline status change, shelf location tagging,
  * universal journaling with emotional reaction chips, and a confirm-gated delete.
  */
-export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
+export default function LibraryDetail({ item, existingItems, onClose, onSelectItem }: LibraryDetailProps) {
   const update = useUpdateItem()
   const remove = useDeleteItem()
   const updateOwnership = useUpdateOwnership()
@@ -52,6 +57,24 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
   // cache-busting query param forces the browser to re-fetch the same path.
   const [artwork, setArtwork] = useState(item.artworkPath)
   const artBusy = refreshArt.isPending || uploadArt.isPending
+  const [tvTab, setTvTab] = useState<'episodes' | 'related' | 'recommended'>('episodes')
+  const [mediaTab, setMediaTab] = useState<'related' | 'recommended'>('related')
+  const { data: relatedItems } = useRelatedMedia(item.type, item.externalId)
+  const { data: recommendedItems } = useRecommendedMedia(item.type, item.externalId)
+  const hasRelated = relatedItems !== undefined && relatedItems.length > 0
+  const { data: detailItem } = useLibraryItem(item.id)
+  const activeItem = detailItem ?? item
+
+  const handleSelectRelated = (rel: { type: string; externalId: string }) => {
+    if (onSelectItem && existingItems) {
+      const match = existingItems.find(
+        (i) => i.type === rel.type && i.externalId === rel.externalId,
+      )
+      if (match) {
+        onSelectItem(match)
+      }
+    }
+  }
 
   const { data: seerrConfigured } = useSeerrConfigured()
   const isTV = item.type === 'TV'
@@ -354,21 +377,21 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
           </div>
         )}
 
-        {(isBook || isGame || isMovie) && item.description !== '' && (
+        {(isBook || isGame || isMovie) && activeItem.description !== '' && (
           <div className="detail-summary">
             <h3>Summary</h3>
-            <p>{item.description}</p>
+            <p>{activeItem.description}</p>
           </div>
         )}
-        {(isBook || isGame || isMovie) && item.description === '' && (
+        {(isBook || isGame || isMovie) && activeItem.description === '' && (
           <p className="muted detail-summary">No summary available.</p>
         )}
 
-        {item.tags.length > 0 && (
+        {activeItem.tags && activeItem.tags.length > 0 && (
           <div className="detail-summary">
             <h3>Tags</h3>
             <div className="tag-list">
-              {item.tags.map((tag) => (
+              {activeItem.tags.map((tag) => (
                 <span key={tag} className="badge">
                   {tag}
                 </span>
@@ -392,8 +415,196 @@ export default function LibraryDetail({ item, onClose }: LibraryDetailProps) {
 
         {isTV && item.showId > 0 && (
           <div className="detail-summary">
-            <h3>Episodes</h3>
-            <EpisodeList showId={item.showId} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className={`heading-toggle ${tvTab === 'episodes' ? 'active' : ''}`}
+                onClick={() => setTvTab('episodes')}
+                style={{
+                  background: tvTab === 'episodes' ? 'var(--surface-alt)' : 'var(--surface)',
+                  border: tvTab === 'episodes' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  boxShadow: tvTab === 'episodes' ? 'none' : 'var(--shadow-sm)',
+                  borderRadius: 'var(--radius-sm, 6px)',
+                  padding: '0.3rem 0.75rem',
+                  cursor: 'pointer',
+                  fontSize: '0.98rem',
+                  fontWeight: 650,
+                  letterSpacing: '-0.02em',
+                  color: tvTab === 'episodes' ? 'var(--text)' : 'var(--muted)',
+                  transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                }}
+              >
+                Episodes
+              </button>
+
+              <span style={{ color: 'var(--border)', fontSize: '1.1rem', userSelect: 'none', margin: '0 0.1rem' }}>|</span>
+
+              <button
+                type="button"
+                className={`heading-toggle ${tvTab === 'recommended' ? 'active' : ''}`}
+                onClick={() => setTvTab('recommended')}
+                style={{
+                  background: tvTab === 'recommended' ? 'var(--surface-alt)' : 'var(--surface)',
+                  border: tvTab === 'recommended' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                  boxShadow: tvTab === 'recommended' ? 'none' : 'var(--shadow-sm)',
+                  borderRadius: 'var(--radius-sm, 6px)',
+                  padding: '0.3rem 0.75rem',
+                  cursor: 'pointer',
+                  fontSize: '0.98rem',
+                  fontWeight: 650,
+                  letterSpacing: '-0.02em',
+                  color: tvTab === 'recommended' ? 'var(--text)' : 'var(--muted)',
+                  transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                }}
+              >
+                Recommended Shows
+                {recommendedItems && recommendedItems.length > 0 && (
+                  <span className="badge" style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem' }}>
+                    {Math.min(recommendedItems.length, 6)}
+                  </span>
+                )}
+              </button>
+
+              {hasRelated && (
+                <>
+                  <span style={{ color: 'var(--border)', fontSize: '1.1rem', userSelect: 'none', margin: '0 0.1rem' }}>|</span>
+                  <button
+                    type="button"
+                    className={`heading-toggle ${tvTab === 'related' ? 'active' : ''}`}
+                    onClick={() => setTvTab('related')}
+                    style={{
+                      background: tvTab === 'related' ? 'var(--surface-alt)' : 'var(--surface)',
+                      border: tvTab === 'related' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                      boxShadow: tvTab === 'related' ? 'none' : 'var(--shadow-sm)',
+                      borderRadius: 'var(--radius-sm, 6px)',
+                      padding: '0.3rem 0.75rem',
+                      cursor: 'pointer',
+                      fontSize: '0.98rem',
+                      fontWeight: 650,
+                      letterSpacing: '-0.02em',
+                      color: tvTab === 'related' ? 'var(--text)' : 'var(--muted)',
+                      transition: 'all 0.15s ease',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    Related Continuity
+                    <span className="badge" style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem' }}>
+                      {relatedItems.length}
+                    </span>
+                  </button>
+                </>
+              )}
+            </div>
+
+            {tvTab === 'episodes' ? (
+              <EpisodeList showId={item.showId} />
+            ) : tvTab === 'related' ? (
+              <RelatedTab
+                mediaType={item.type}
+                externalId={item.externalId}
+                title={item.title}
+                onSelectItem={handleSelectRelated}
+              />
+            ) : (
+              <RecommendedTab
+                mediaType={item.type}
+                externalId={item.externalId}
+                title={item.title}
+                onSelectItem={handleSelectRelated}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Cross-Media Continuity and Recommended for non-TV items (Books, Movies, Games) */}
+        {!isTV && (hasRelated || (recommendedItems !== undefined && recommendedItems.length > 0)) && (
+          <div className="detail-summary">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem', flexWrap: 'wrap' }}>
+              {hasRelated && (
+                <button
+                  type="button"
+                  className={`heading-toggle ${mediaTab === 'related' ? 'active' : ''}`}
+                  onClick={() => setMediaTab('related')}
+                  style={{
+                    background: mediaTab === 'related' ? 'var(--surface-alt)' : 'var(--surface)',
+                    border: mediaTab === 'related' ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                    boxShadow: mediaTab === 'related' ? 'none' : 'var(--shadow-sm)',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    padding: '0.3rem 0.75rem',
+                    cursor: 'pointer',
+                    fontSize: '0.98rem',
+                    fontWeight: 650,
+                    letterSpacing: '-0.02em',
+                    color: mediaTab === 'related' ? 'var(--text)' : 'var(--muted)',
+                    transition: 'all 0.15s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                >
+                  Related Continuity
+                  <span className="badge" style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem' }}>
+                    {relatedItems.length}
+                  </span>
+                </button>
+              )}
+
+              {hasRelated && recommendedItems && recommendedItems.length > 0 && (
+                <span style={{ color: 'var(--border)', fontSize: '1.1rem', userSelect: 'none', margin: '0 0.1rem' }}>|</span>
+              )}
+
+              {recommendedItems && recommendedItems.length > 0 && (
+                <button
+                  type="button"
+                  className={`heading-toggle ${mediaTab === 'recommended' || !hasRelated ? 'active' : ''}`}
+                  onClick={() => setMediaTab('recommended')}
+                  style={{
+                    background: mediaTab === 'recommended' || !hasRelated ? 'var(--surface-alt)' : 'var(--surface)',
+                    border: mediaTab === 'recommended' || !hasRelated ? '1.5px solid var(--accent)' : '1px solid var(--border)',
+                    boxShadow: mediaTab === 'recommended' || !hasRelated ? 'none' : 'var(--shadow-sm)',
+                    borderRadius: 'var(--radius-sm, 6px)',
+                    padding: '0.3rem 0.75rem',
+                    cursor: 'pointer',
+                    fontSize: '0.98rem',
+                    fontWeight: 650,
+                    letterSpacing: '-0.02em',
+                    color: mediaTab === 'recommended' || !hasRelated ? 'var(--text)' : 'var(--muted)',
+                    transition: 'all 0.15s ease',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                  }}
+                >
+                  {isMovie ? 'Recommended Movies' : isGame ? 'Recommended Games' : isBook ? 'Recommended Books' : 'Recommendations'}
+                  <span className="badge" style={{ fontSize: '0.72rem', padding: '0.1rem 0.4rem' }}>
+                    {Math.min(recommendedItems.length, 6)}
+                  </span>
+                </button>
+              )}
+            </div>
+
+            {mediaTab === 'related' && hasRelated ? (
+              <RelatedTab
+                mediaType={item.type}
+                externalId={item.externalId}
+                title={item.title}
+                onSelectItem={handleSelectRelated}
+              />
+            ) : (
+              <RecommendedTab
+                mediaType={item.type}
+                externalId={item.externalId}
+                title={item.title}
+                onSelectItem={handleSelectRelated}
+              />
+            )}
           </div>
         )}
 

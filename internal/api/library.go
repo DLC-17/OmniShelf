@@ -25,6 +25,7 @@ type libraryHandler struct {
 func RegisterLibraryRoutes(grp *gin.RouterGroup, svc *books.Service) {
 	h := &libraryHandler{svc: svc}
 	grp.GET("/library", h.list)
+	grp.GET("/items/:id", h.getItem)
 	grp.PATCH("/items/:id", h.update)
 	grp.PUT("/items/:id/ownership", h.setOwnership)
 	grp.DELETE("/items/:id", h.remove)
@@ -103,14 +104,26 @@ type updateItemRequest struct {
 	Location *string `json:"location"`
 }
 
-// list handles GET /api/library?type=&status= — the current user's shelf,
-// enriched with artwork and book metadata.
+// list handles GET /api/library?type=&status=&search=&after=&limit= — the current user's shelf,
+// enriched with artwork and book metadata, paginated with keyset cursors.
 func (h *libraryHandler) list(c *gin.Context) {
 	filter := books.LibraryFilter{
 		Type:       c.Query("type"),
 		Status:     c.Query("status"),
 		Location:   c.Query("location"),
 		Collection: c.Query("collection"),
+		Search:     strings.TrimSpace(c.Query("search")),
+	}
+
+	if afterStr := c.Query("after"); afterStr != "" {
+		if id, err := strconv.ParseUint(afterStr, 10, 64); err == nil {
+			filter.After = uint(id)
+		}
+	}
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = n
+		}
 	}
 
 	if ratingStr := c.Query("rating"); ratingStr != "" {
@@ -128,18 +141,39 @@ func (h *libraryHandler) list(c *gin.Context) {
 		filter.Tags = tags
 	}
 
-	entries, err := h.svc.ListLibrary(c.Request.Context(), CurrentUserID(c), filter)
+	page, err := h.svc.ListLibrary(c.Request.Context(), CurrentUserID(c), filter)
 	switch {
 	case errors.Is(err, books.ErrInvalidFilter):
-		Error(c, http.StatusBadRequest, CodeInvalidRequest, "type must be TV, BOOK, GAME, MOVIE, MUSIC, or CARD; status must be WATCHING, READING, PLAYING, LISTENING, OWNED, PLAN_TO, COMPLETED, or STOPPED")
+		Error(c, http.StatusBadRequest, CodeInvalidRequest, err.Error())
 	case err != nil:
 		Error(c, http.StatusInternalServerError, CodeInternal, "listing library failed")
 	default:
-		out := make([]itemResponse, 0, len(entries))
-		for i := range entries {
-			out = append(out, toLibraryResponse(&entries[i]))
+		items := make([]itemResponse, 0, len(page.Items))
+		for i := range page.Items {
+			items = append(items, toLibraryResponse(&page.Items[i]))
 		}
-		c.JSON(http.StatusOK, out)
+		c.JSON(http.StatusOK, gin.H{
+			"items":      items,
+			"totalCount": page.TotalCount,
+			"hasMore":    page.HasMore,
+		})
+	}
+}
+
+// getItem handles GET /api/items/:id — full detail for one library item with untruncated description.
+func (h *libraryHandler) getItem(c *gin.Context) {
+	itemID, ok := itemIDParam(c)
+	if !ok {
+		return
+	}
+	entry, err := h.svc.GetLibraryItem(c.Request.Context(), CurrentUserID(c), itemID)
+	switch {
+	case errors.Is(err, books.ErrItemNotFound):
+		Error(c, http.StatusNotFound, CodeNotFound, "tracking item not found")
+	case err != nil:
+		Error(c, http.StatusInternalServerError, CodeInternal, "loading item failed")
+	default:
+		c.JSON(http.StatusOK, toLibraryResponse(entry))
 	}
 }
 

@@ -60,14 +60,24 @@ export default function Upcoming() {
             const rel = relativeDays(item.date)
             return (
               <li key={`${item.title}-${item.date}-${i}`} className="card">
-                <div className="card-row">
-                  <Poster posterPath={item.posterPath} title={item.title} width={48} height={72} />
-                  <div className="grow">
-                    <h3 style={{ margin: '0 0 0.15rem' }}>{item.title}</h3>
-                    {item.detail !== '' && <p style={{ margin: 0 }}>{item.detail}</p>}
-                    <p className="meta">
+                <div className="show-card-row">
+                  <div className="show-card-poster">
+                    <Poster
+                      posterPath={item.posterPath}
+                      title={item.title}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                  </div>
+                  <div className="show-card-content">
+                    <h3 style={{ margin: '0 0 0.25rem', fontSize: '1.05rem', lineHeight: 1.25 }}>{item.title}</h3>
+                    {item.detail !== '' && (
+                      <p style={{ margin: '0 0 0.25rem', fontWeight: 550, color: 'var(--text)' }}>
+                        {item.detail}
+                      </p>
+                    )}
+                    <p className="meta" style={{ fontSize: '0.82rem', margin: 0 }}>
                       {formatDate(item.date)}
-                      {rel !== '' && <span className="tag" style={{ marginLeft: '0.5rem' }}>{rel}</span>}
+                      {rel !== '' && <span className="tag" style={{ marginLeft: '0.4rem' }}>{rel}</span>}
                     </p>
                   </div>
                 </div>

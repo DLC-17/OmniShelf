@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -9,12 +10,18 @@ import (
 
 	"github.com/davidlc1229/omnishelf/internal/models"
 	"github.com/davidlc1229/omnishelf/internal/movies"
+	"github.com/davidlc1229/omnishelf/internal/related"
+	"github.com/davidlc1229/omnishelf/internal/tmdb"
 )
 
 // RegisterMovieRoutes attaches the movie endpoints to the JWT-guarded /api
 // group returned by RegisterRoutes.
-func RegisterMovieRoutes(grp *gin.RouterGroup, svc *movies.Service) {
-	h := &moviesHandler{svc: svc}
+func RegisterMovieRoutes(grp *gin.RouterGroup, svc *movies.Service, relatedSvc *related.Service, tmdbClient *tmdb.Client) {
+	h := &moviesHandler{
+		svc:        svc,
+		relatedSvc: relatedSvc,
+		tmdbClient: tmdbClient,
+	}
 	grp.GET("/movies/search", h.search)
 	grp.POST("/movies", h.addMovie)
 	grp.GET("/movies/discover", h.discover)
@@ -22,7 +29,9 @@ func RegisterMovieRoutes(grp *gin.RouterGroup, svc *movies.Service) {
 }
 
 type moviesHandler struct {
-	svc *movies.Service
+	svc        *movies.Service
+	relatedSvc *related.Service
+	tmdbClient *tmdb.Client
 }
 
 type movieSearchResult struct {
@@ -91,6 +100,11 @@ func (h *moviesHandler) addMovie(c *gin.Context) {
 	if err != nil {
 		h.writeError(c, err)
 		return
+	}
+	if h.relatedSvc != nil && h.tmdbClient != nil && res != nil {
+		go func() {
+			_ = h.relatedSvc.SyncTMDBMovieRelations(context.Background(), h.tmdbClient, res.Movie.ID, res.Movie.TMDBID)
+		}()
 	}
 	c.JSON(http.StatusCreated, gin.H{
 		"movie": toMovieDTO(res.Movie),

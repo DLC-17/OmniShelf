@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { ApiError } from '../api/client'
+import { fetchLibrary } from '../api/library'
 import type { ItemStatus, LibraryItem, MediaType } from '../api/library'
 import LibraryDetail from '../components/library/LibraryDetail'
 import LibraryToolbar from '../components/library/LibraryToolbar'
@@ -9,7 +11,7 @@ import type { FilterState } from '../lib/librarySearch'
 import MovieSearch from '../components/movies/MovieSearch'
 import MusicSearch from '../components/music/MusicSearch'
 import Poster from '../components/tv/Poster'
-import { useLibrary } from '../hooks/useLibrary'
+import { useInfiniteLibrary } from '../hooks/useLibrary'
 import ShowSearch from '../components/tv/ShowSearch'
 import GameSearch from '../components/games/GameSearch'
 import BookSearch from '../components/books/BookSearch'
@@ -122,10 +124,15 @@ export default function Library() {
   )
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [collapsed, setCollapsed] = useState<Set<ItemStatus>>(new Set())
-  // Per-tab library search + filters, applied client-side to the loaded items.
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [filters, setFilters] = useState<FilterState>({})
   const [cardFilter, setCardFilter] = useState<'ALL' | 'POKEMON' | 'YUGIOH'>('ALL')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(timer)
+  }, [search])
 
   useEffect(() => {
     const typeParam = searchParams.get('type') as MediaType | null
@@ -142,13 +149,66 @@ export default function Library() {
       return next
     })
 
-  const library = useLibrary({ type: media })
+  const tagParam = filters.tag && filters.tag.length > 0 ? filters.tag.join(',') : undefined
+  const ratingParam = filters.rating?.[0] ? parseInt(filters.rating[0], 10) : undefined
 
-  const items: LibraryItem[] = library.data ?? []
-  const visible = useMemo(
-    () => applyLibrarySearch(library.data ?? [], search, filters, media),
-    [library.data, search, filters, media],
+  const library = useInfiniteLibrary({
+    type: media,
+    search: debouncedSearch.trim() || undefined,
+    status: (filters.status?.[0] as ItemStatus) || undefined,
+    tag: tagParam,
+    rating: ratingParam,
+  })
+
+  const items = useMemo<LibraryItem[]>(
+    () => library.data?.pages.flatMap((p) => p.items) ?? [],
+    [library.data],
   )
+
+  // Infinite scroll observer sentinel
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!sentinelRef.current || !library.hasNextPage || library.isFetchingNextPage) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && library.hasNextPage && !library.isFetchingNextPage) {
+          library.fetchNextPage()
+        }
+      },
+      { rootMargin: '300px' },
+    )
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [library.hasNextPage, library.isFetchingNextPage, library.fetchNextPage])
+
+  // Prefetch adjacent tabs on idle (1s)
+  const queryClient = useQueryClient()
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const allTabs: MediaType[] = ['TV', 'BOOK', 'GAME', 'MOVIE', 'MUSIC', 'CARD']
+      const idx = allTabs.indexOf(media)
+      const adjacent = [
+        allTabs[(idx + 1) % allTabs.length],
+        allTabs[(idx + allTabs.length - 1) % allTabs.length],
+      ]
+      for (const tab of adjacent) {
+        queryClient.prefetchInfiniteQuery({
+          queryKey: ['library', 'infinite', tab, '', ''],
+          queryFn: () => fetchLibrary({ type: tab }),
+          initialPageParam: 0,
+          staleTime: 5 * 60 * 1000,
+        })
+      }
+    }, 1000)
+    return () => clearTimeout(timer)
+  }, [media, queryClient])
+
+  const visible = useMemo(
+    () => applyLibrarySearch(items, debouncedSearch, filters, media),
+    [items, debouncedSearch, filters, media],
+  )
+
+  const groupedByArtist = useMemo(() => groupByArtist(visible), [visible])
 
   // Card valuation and filter calculations
   const pokemonCards = useMemo(() => items.filter((c) => c.externalId.startsWith('ptcg:')), [items])
@@ -162,6 +222,8 @@ export default function Library() {
     if (cardFilter === 'YUGIOH') return visible.filter((c) => c.externalId.startsWith('ygo:'))
     return visible
   }, [visible, cardFilter])
+
+  const groupedByGameAndSet = useMemo(() => groupByGameAndSet(filteredCardItems), [filteredCardItems])
 
   const currentCardValuation = useMemo(() => {
     if (cardFilter === 'POKEMON') return pokemonValuation
@@ -264,7 +326,7 @@ export default function Library() {
 
       {media === 'MUSIC' &&
         visible.length > 0 &&
-        groupByArtist(visible).map(({ artist, albums }) => {
+        groupedByArtist.map(({ artist, albums }) => {
           const open = !collapsed.has(artist as ItemStatus)
           return (
             <section key={artist} className="library-section">
@@ -382,7 +444,7 @@ export default function Library() {
 
       {media === 'CARD' &&
         filteredCardItems.length > 0 &&
-        groupByGameAndSet(filteredCardItems).map(({ game, sets }) => (
+        groupedByGameAndSet.map(({ game, sets }) => (
           <section key={game} aria-label={game}>
             <h2>{game}</h2>
             {sets.map(({ set, cards }) => {
@@ -487,8 +549,16 @@ export default function Library() {
 
       
 
+      <div ref={sentinelRef} style={{ height: '20px', margin: '1rem 0' }} />
+      {library.isFetchingNextPage && <p className="muted" style={{ textAlign: 'center' }}>Loading more…</p>}
+
       {selected !== null && (
-        <LibraryDetail item={selected} onClose={() => setSelectedId(null)} />
+        <LibraryDetail
+          item={selected}
+          existingItems={items}
+          onClose={() => setSelectedId(null)}
+          onSelectItem={(item) => setSelectedId(item.id)}
+        />
       )}
     </section>
   )

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ApiError } from '../api/client'
 import type { LibraryItem } from '../api/library'
-import { useLibrary } from '../hooks/useLibrary'
+import { useAllLibraryItems } from '../hooks/useLibrary'
 import LibraryDetail from '../components/library/LibraryDetail'
 import Poster from '../components/tv/Poster'
 import { formatUsd } from '../lib/currency'
@@ -53,8 +53,8 @@ export default function Cards() {
   const [search, setSearch] = useState('')
   const [cardFilter, setCardFilter] = useState<'ALL' | 'POKEMON' | 'YUGIOH'>('ALL')
 
-  const library = useLibrary({ type: 'CARD' })
-  const items: LibraryItem[] = library.data ?? []
+  const library = useAllLibraryItems({ type: 'CARD' })
+  const items: LibraryItem[] = library.data
 
   const pokemonCount = useMemo(() => items.filter((c) => c.externalId.startsWith('ptcg:')).length, [items])
   const yugiohCount = useMemo(() => items.filter((c) => c.externalId.startsWith('ygo:')).length, [items])

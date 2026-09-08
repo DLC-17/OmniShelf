@@ -3,13 +3,16 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/gin-contrib/gzip"
 	"github.com/gin-gonic/gin"
 	"github.com/robfig/cron/v3"
 
@@ -25,11 +28,13 @@ import (
 	"github.com/davidlc1229/omnishelf/internal/igdb"
 	"github.com/davidlc1229/omnishelf/internal/images"
 	"github.com/davidlc1229/omnishelf/internal/importer"
+	"github.com/davidlc1229/omnishelf/internal/logistics"
 	"github.com/davidlc1229/omnishelf/internal/movies"
 	"github.com/davidlc1229/omnishelf/internal/music"
 	"github.com/davidlc1229/omnishelf/internal/musicbrainz"
 	"github.com/davidlc1229/omnishelf/internal/openlibrary"
 	"github.com/davidlc1229/omnishelf/internal/pokemontcg"
+	"github.com/davidlc1229/omnishelf/internal/related"
 	"github.com/davidlc1229/omnishelf/internal/scandex"
 	"github.com/davidlc1229/omnishelf/internal/scanner"
 	"github.com/davidlc1229/omnishelf/internal/seerr"
@@ -90,7 +95,7 @@ func runServer() error {
 	if err := router.SetTrustedProxies(nil); err != nil {
 		return fmt.Errorf("configuring trusted proxies: %w", err)
 	}
-	router.Use(gin.Logger(), gin.Recovery(), api.SecurityHeaders())
+	router.Use(gin.Logger(), gin.Recovery(), gzip.Gzip(gzip.DefaultCompression), api.SecurityHeaders())
 
 	// Shared external clients and image cache.
 	tmdbClient := tmdb.New(cfg.TMDBAPIKey)
@@ -119,8 +124,11 @@ func runServer() error {
 	tvSvc := tv.New(gdb, tmdbClient, imageStore)
 	api.RegisterTVRoutes(protected, tvSvc)
 
+	relatedSvc := related.NewService(gdb)
+	api.RegisterRelatedRoutes(protected, relatedSvc, tmdbClient, igdbClient)
+
 	movieSvc := movies.New(gdb, tmdbClient, imageStore)
-	api.RegisterMovieRoutes(protected, movieSvc)
+	api.RegisterMovieRoutes(protected, movieSvc, relatedSvc, tmdbClient)
 
 	bookSvc := books.NewService(gdb, olClient, imageStore)
 	api.RegisterBookRoutes(protected, bookSvc)
@@ -128,7 +136,7 @@ func runServer() error {
 	api.RegisterNoteRoutes(protected, bookSvc)
 
 	gameSvc := games.NewService(gdb, scandexClient, igdbClient, imageStore)
-	api.RegisterGameRoutes(protected, gameSvc)
+	api.RegisterGameRoutes(protected, gameSvc, relatedSvc, igdbClient)
 
 	musicSvc := music.NewService(gdb, discogsClient, musicbrainzClient, imageStore)
 	api.RegisterMusicRoutes(protected, musicSvc)
@@ -156,12 +164,18 @@ func runServer() error {
 	api.RegisterSeerrRoutes(protected, seerrClient)
 	api.RegisterGOGRoutes(protected, gdb, gameSvc, cfg.GOGAccessToken)
 
+	logisticsSvc := logistics.NewService(gdb)
+	api.RegisterLogisticsRoutes(protected, logisticsSvc)
+
 	// Inbound media server webhooks (Jellyfin, Emby, Plex)
 	api.RegisterWebhookRoutes(router, gdb, tvSvc, movieSvc, cfg)
 
 	// Nightly TMDB sync at 03:00.
 	engine := syncengine.New(gdb, tmdbClient, imageStore,
 		syncengine.WithReconcileWatching(tvSvc.ReconcileAllWatching),
+		syncengine.WithSyncRelations(func(ctx context.Context) error {
+			return relatedSvc.SweepAndSyncAllRelations(ctx, tmdbClient, igdbClient)
+		}),
 	)
 	cronScheduler := cron.New()
 	if err := engine.Schedule(cronScheduler); err != nil {
@@ -183,6 +197,7 @@ func runServer() error {
 	// automatically carry the session cookie, so no frontend changes are
 	// needed.
 	imagesGroup := router.Group("/", api.AuthRequired([]byte(cfg.JWTSecret)))
+	imagesGroup.Use(cacheControl("public, max-age=31536000, immutable"))
 	imagesGroup.StaticFS("/images", gin.Dir(cfg.ImagesDir, false))
 
 	// API routes are registered by later tasks; an unknown /api path must be a
@@ -191,6 +206,11 @@ func runServer() error {
 		if len(c.Request.URL.Path) >= 4 && c.Request.URL.Path[:4] == "/api" {
 			c.JSON(404, gin.H{"error": "not_found", "message": "unknown API route"})
 			return
+		}
+		if strings.HasPrefix(c.Request.URL.Path, "/assets/") {
+			c.Header("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			c.Header("Cache-Control", "no-cache")
 		}
 		c.FileFromFS(c.Request.URL.Path, assets)
 	})
@@ -226,4 +246,12 @@ func runServer() error {
 		}
 	}
 	return nil
+}
+
+// cacheControl injects a Cache-Control header on all responses in the group.
+func cacheControl(value string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Cache-Control", value)
+		c.Next()
+	}
 }

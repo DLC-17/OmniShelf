@@ -16,7 +16,7 @@ interface LibraryToolbarProps {
  * The per-media-type library toolbar: a free-text search over the loaded items
  * plus a collapsed-by-default filter dropdown exposing the aspects that make
  * sense for the current tab (status everywhere; author for books; platform and
- * ownership for games; tags where present). Search and filtering both run
+ * ownership for games; ratings/artists). Search and filtering both run
  * client-side against the already-fetched items.
  */
 export default function LibraryToolbar({
@@ -44,22 +44,6 @@ export default function LibraryToolbar({
     () => Object.values(filters).reduce((n, vals) => n + (vals?.length ?? 0), 0),
     [filters],
   )
-
-  // Top tags for the quick-pill rail (up to 8, sorted by frequency)
-  const topTags = useMemo(() => {
-    const tagDef = ASPECTS[media].find((d) => d.aspect === 'tag')
-    if (!tagDef) return []
-    const freq = new Map<string, number>()
-    for (const item of items) {
-      for (const tag of tagDef.values(item)) {
-        freq.set(tag, (freq.get(tag) ?? 0) + 1)
-      }
-    }
-    return [...freq.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 8)
-      .map(([tag]) => tag)
-  }, [items, media])
 
   // Close the dropdown on outside click or Escape while it is open.
   useEffect(() => {
@@ -145,24 +129,6 @@ export default function LibraryToolbar({
           </div>
         )}
       </div>
-      {topTags.length > 0 && (
-        <div className="tag-pill-rail" aria-label="Quick tag filters">
-          {topTags.map((tag) => {
-            const active = (filters.tag ?? []).includes(tag)
-            return (
-              <button
-                key={tag}
-                type="button"
-                className={active ? 'tag-pill active' : 'tag-pill'}
-                aria-pressed={active}
-                onClick={() => toggleValue('tag', tag)}
-              >
-                {tag}
-              </button>
-            )
-          })}
-        </div>
-      )}
     </div>
   )
 }

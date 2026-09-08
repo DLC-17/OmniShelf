@@ -73,6 +73,11 @@ export default function CommandPalette({ isOpen: controlledIsOpen, onClose }: Co
   // Listen to global Ctrl+K / Cmd+K shortcut
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isOpen && e.key === 'Escape') {
+        e.preventDefault()
+        handleClose()
+        return
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault()
         if (isOpen) {
@@ -327,6 +332,50 @@ export default function CommandPalette({ isOpen: controlledIsOpen, onClose }: Co
       icon: '🪨',
       action: () => {
         setTheme('obsidian')
+        handleClose()
+      },
+    },
+    {
+      id: 'theme-e-ink',
+      title: 'Theme: E-Ink Monochrome',
+      subtitle: 'Pure high-contrast black & white for e-readers & sunlight',
+      category: 'Actions',
+      icon: '📖',
+      action: () => {
+        setTheme('e-ink')
+        handleClose()
+      },
+    },
+    {
+      id: 'theme-nord',
+      title: 'Theme: Nord',
+      subtitle: 'Arctic, north-bluish palette with clean frosty aesthetics',
+      category: 'Actions',
+      icon: '❄️',
+      action: () => {
+        setTheme('nord')
+        handleClose()
+      },
+    },
+    {
+      id: 'theme-solarized',
+      title: 'Theme: Solarized Dark',
+      subtitle: 'Low eye-strain palette engineered for dark environments',
+      category: 'Actions',
+      icon: '🌌',
+      action: () => {
+        setTheme('solarized-dark')
+        handleClose()
+      },
+    },
+    {
+      id: 'theme-catppuccin',
+      title: 'Theme: Catppuccin Macchiato',
+      subtitle: 'Warm pastel palette with soothing undertones',
+      category: 'Actions',
+      icon: '🐱',
+      action: () => {
+        setTheme('catppuccin')
         handleClose()
       },
     },

@@ -57,6 +57,7 @@ type Engine struct {
 	httpClient        *http.Client
 	imageBaseURL      string
 	reconcileWatching func(ctx context.Context) error
+	syncRelations     func(ctx context.Context) error
 }
 
 // Option customizes an Engine.
@@ -77,6 +78,11 @@ func WithImageBaseURL(u string) Option {
 // each run to flip WATCHING shows to COMPLETED where all episodes are watched.
 func WithReconcileWatching(fn func(ctx context.Context) error) Option {
 	return func(e *Engine) { e.reconcileWatching = fn }
+}
+
+// WithSyncRelations registers a callback to refresh cross-media continuity and franchise relations.
+func WithSyncRelations(fn func(ctx context.Context) error) Option {
+	return func(e *Engine) { e.syncRelations = fn }
 }
 
 // New returns a sync Engine. db must be the application's shared *gorm.DB;
@@ -159,6 +165,13 @@ func (e *Engine) Run(ctx context.Context) (err error) {
 	if e.reconcileWatching != nil {
 		if recErr := e.reconcileWatching(ctx); recErr != nil {
 			log.Printf("sync: reconcile watching→completed: %v", recErr)
+		}
+	}
+
+	// Auto-pull and refresh relational metadata (franchises, cinematic universes, sequels/prequels).
+	if e.syncRelations != nil {
+		if relErr := e.syncRelations(ctx); relErr != nil {
+			log.Printf("sync: sync relations: %v", relErr)
 		}
 	}
 

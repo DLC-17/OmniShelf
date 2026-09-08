@@ -1,20 +1,13 @@
 #!/bin/sh
 set -e
 
-# Ensure data directories exist
-mkdir -p /data /images
-
-# Check if /data is owned by omnishelf (UID 568), if not, fix it
-if [ "$(stat -c '%u' /data)" != "568" ]; then
-    echo "Fixing permissions for /data..."
-    chown -R omnishelf:omnishelf /data
+# If running as root (legacy setups), attempt to fix permissions and drop privileges
+if [ "$(id -u)" = "0" ]; then
+    chown -R omnishelf:omnishelf /data /images 2>/dev/null || true
+    if su-exec omnishelf true 2>/dev/null; then
+        exec su-exec omnishelf "$@"
+    fi
 fi
 
-# Check if /images is owned by omnishelf (UID 568), if not, fix it
-if [ "$(stat -c '%u' /images)" != "568" ]; then
-    echo "Fixing permissions for /images..."
-    chown -R omnishelf:omnishelf /images
-fi
-
-# Drop privileges from root to omnishelf and execute the main command
-exec su-exec omnishelf "$@"
+# Native non-root execution (omnishelf UID 568)
+exec "$@"

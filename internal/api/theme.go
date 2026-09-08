@@ -10,7 +10,7 @@ import (
 )
 
 // validThemes is the authoritative list of supported theme identifiers.
-var validThemes = []string{"dark-espresso", "midnight-oled", "cream-paper", "dracula", "obsidian"}
+var validThemes = []string{"dark-espresso", "midnight-oled", "cream-paper", "dracula", "obsidian", "e-ink", "nord", "solarized-dark", "catppuccin"}
 
 // RegisterThemeRoutes registers the theme persistence endpoints.
 // It should be called on the protected router group.
@@ -30,7 +30,7 @@ type themeResponse struct {
 }
 
 type themeUpdatePayload struct {
-	Theme string `json:"theme" binding:"required,oneof=dark-espresso midnight-oled cream-paper dracula obsidian"`
+	Theme string `json:"theme" binding:"required,oneof=dark-espresso midnight-oled cream-paper dracula obsidian e-ink nord solarized-dark catppuccin"`
 }
 
 // listThemes returns the list of supported theme identifiers.

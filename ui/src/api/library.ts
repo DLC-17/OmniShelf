@@ -69,17 +69,39 @@ export interface LibraryItem {
   updatedAt: string
 }
 
+export interface LibraryPage {
+  items: LibraryItem[]
+  totalCount: number
+  hasMore: boolean
+}
+
 export interface LibraryFilters {
   type?: MediaType | ''
   status?: ItemStatus | ''
+  search?: string
+  after?: number
+  limit?: number
+  rating?: number
+  tag?: string
+  location?: string
 }
 
-export function fetchLibrary(filters: LibraryFilters = {}): Promise<LibraryItem[]> {
+export function fetchLibrary(filters: LibraryFilters = {}): Promise<LibraryPage> {
   const params = new URLSearchParams()
   if (filters.type) params.set('type', filters.type)
   if (filters.status) params.set('status', filters.status)
+  if (filters.search) params.set('search', filters.search)
+  if (filters.after !== undefined && filters.after > 0) params.set('after', filters.after.toString())
+  if (filters.limit !== undefined && filters.limit > 0) params.set('limit', filters.limit.toString())
+  if (filters.rating !== undefined && filters.rating > 0) params.set('rating', filters.rating.toString())
+  if (filters.tag) params.set('tag', filters.tag)
+  if (filters.location) params.set('location', filters.location)
   const qs = params.toString()
-  return request<LibraryItem[]>(qs === '' ? '/api/library' : `/api/library?${qs}`)
+  return request<LibraryPage>(qs === '' ? '/api/library' : `/api/library?${qs}`)
+}
+
+export function fetchLibraryItem(id: number): Promise<LibraryItem> {
+  return request<LibraryItem>(`/api/items/${id}`)
 }
 
 export interface UpdateItemPatch {

@@ -2,9 +2,11 @@ import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getTimeSpent, getHeatmap, getBadges } from '../api/stats'
 import type { TimeSpentStats, HeatmapEntry, Badge } from '../api/stats'
-import { useLibrary } from '../hooks/useLibrary'
+import { useAllLibraryItems } from '../hooks/useLibrary'
 import type { LibraryItem } from '../api/library'
 import { formatUsd } from '../lib/currency'
+
+import OmniShelfWrappedModal from '../components/stats/OmniShelfWrappedModal'
 
 function formatMinutes(mins: number): string {
   const h = Math.floor(mins / 60)
@@ -91,8 +93,9 @@ export function Stats() {
 
   // Trading Cards Collection Data
   const [cardFilter, setCardFilter] = useState<'ALL' | 'POKEMON' | 'YUGIOH'>('ALL')
-  const cardsLibrary = useLibrary({ type: 'CARD' })
-  const cards: LibraryItem[] = cardsLibrary.data ?? []
+  const [showWrapped, setShowWrapped] = useState(false)
+  const cardsLibrary = useAllLibraryItems({ type: 'CARD' })
+  const cards: LibraryItem[] = cardsLibrary.data
 
   const pokemonStats = useMemo(() => {
     const list = cards.filter((c) => c.externalId.startsWith('ptcg:'))
@@ -172,6 +175,43 @@ export function Stats() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
+      {/* OmniShelf Wrapped Retrospective Launch Banner */}
+      <div
+        className="card"
+        style={{
+          margin: 0,
+          background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 25%, var(--surface)) 0%, var(--surface-alt) 100%)',
+          border: '1px solid var(--accent)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+        }}
+      >
+        <div>
+          <span className="badge badge-relation" style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+            Annual Retrospective
+          </span>
+          <h2 style={{ margin: '0.35rem 0 0.2rem', fontSize: '1.35rem' }}>✨ OmniShelf Wrapped</h2>
+          <p className="muted" style={{ margin: 0, fontSize: '0.88rem' }}>
+            Explore your offline year-in-review: total hours, milestone streaks, top creators & physical collection vault growth.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={() => setShowWrapped(true)}
+          style={{ padding: '0.6rem 1.2rem', fontWeight: 600 }}
+        >
+          🚀 Launch Wrapped
+        </button>
+      </div>
+
+      {showWrapped && (
+        <OmniShelfWrappedModal onClose={() => setShowWrapped(false)} />
+      )}
+
       {/* Top Stats Grid: Time Spent (Left) & Collection Value (Right), Stacking Vertically on Mobile */}
       <div
         style={{

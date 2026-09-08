@@ -128,7 +128,7 @@ export function deriveOptions(items: LibraryItem[], def: AspectDef, media: Media
   return out
 }
 
-/** Lowercased searchable blob for one item: title + key attributes + tags. */
+/** Lowercased searchable blob for one item: title + key attributes. */
 export function itemHaystack(item: LibraryItem): string {
   return [
     item.title,
@@ -136,7 +136,6 @@ export function itemHaystack(item: LibraryItem): string {
     item.platform,
     item.artist,
     STATUS_LABELS[item.status] ?? item.status,
-    ...(item.tags ?? []),
     ...(item.ownership ?? []),
   ]
     .filter(Boolean)
