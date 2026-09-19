@@ -15,3 +15,21 @@ ui/node_modules/
 *-credentials.json
 *-serviceaccount.json
 pr/
+
+# Build artifacts
+/omnishelf
+/omnishelf.exe
+*.exe
+ui/dist/
+
+# AI / Orchestration Artifacts
+.ai/
+.claude/
+.rocketride/
+.rundata
+.gemini/
+skills/
+ORCHESTRATION_LOG.md
+task_manifest.json
+project_spec.md
+Architecture.md
