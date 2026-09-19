@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OmniShelf - Unified Media Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Faux toast animation */
+        @keyframes slideIn {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .toast-animate { animation: slideIn 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans min-h-screen flex flex-col">
+
+    <!-- Contextual Wrapper Banner -->
+    <div id="mockup-banner" class="bg-indigo-600 text-white px-4 py-3 shadow-lg flex justify-between items-center z-50">
+        <div>
+            <strong class="font-bold">OmniShelf Static Mockup</strong>
+            <span class="block sm:inline sm:ml-2 text-sm text-indigo-100">
+                Interactive preview of the unified media tracker. Built with Tailwind CSS. No live backend or API calls.
+            </span>
+        </div>
+        <button onclick="document.getElementById('mockup-banner').style.display='none'" class="text-indigo-200 hover:text-white">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+    </div>
+
+    <!-- Top Navigation -->
+    <header class="bg-gray-800 border-b border-gray-700 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-indigo-400">
+                📚 OmniShelf
+            </div>
+            <div class="flex items-center gap-4">
+                <button onclick="triggerScan()" class="bg-indigo-500 hover:bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 shadow-sm">
+                    📷 Scan Barcode / Card
+                </button>
+                <div class="w-8 h-8 rounded-full bg-gray-600 border border-gray-500 flex items-center justify-center text-sm">DC</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full flex flex-col md:flex-row gap-8">
+        
+        <!-- Sidebar Navigation -->
+        <aside class="w-full md:w-48 shrink-0">
+            <nav class="space-y-1" id="category-nav">
+                <!-- Injected via JS -->
+            </nav>
+        </aside>
+
+        <!-- Media Grid -->
+        <div class="flex-1">
+            <div class="flex justify-between items-end mb-6">
+                <h1 id="current-category-title" class="text-2xl font-bold">All Media</h1>
+                <div class="text-sm text-gray-400" id="item-count">0 items</div>
+            </div>
+            
+            <div id="media-grid" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                <!-- Items Injected via JS -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Scan Modal (Hidden by default) -->
+    <div id="scan-modal" class="fixed inset-0 bg-black/70 hidden items-center justify-center z-50 backdrop-blur-sm">
+        <div class="bg-gray-800 border border-gray-700 p-6 rounded-xl shadow-2xl max-w-sm w-full mx-4 text-center">
+            <div class="w-16 h-16 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+            </div>
+            <h3 class="text-lg font-bold text-white mb-2">Camera Access Required</h3>
+            <p class="text-gray-400 text-sm mb-6">Waiting for secure context (HTTPS/Tailscale) to initialize camera for barcode or OCR scanning.</p>
+            <button onclick="simulateScanSuccess()" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white py-2 rounded-lg font-medium transition mb-2">
+                Simulate Successful Scan
+            </button>
+            <button onclick="document.getElementById('scan-modal').classList.replace('flex', 'hidden')" class="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-2 rounded-lg font-medium transition">
+                Cancel
+            </button>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2"></div>
+
+    <script>
+        // Dummy Data simulating SQLite records
+        const mediaItems = [
+            { id: 1, title: "Breaking Bad", type: "TV", status: "Watching", progress: "S4 E12", img: "https://image.tmdb.org/t/p/w300/ggFHVNu6YYI5L9pCfOacjizRGt.jpg", color: "blue" },
+            { id: 2, title: "Dune: Part Two", type: "Movies", status: "Plan to Watch", progress: "Unwatched", img: "https://image.tmdb.org/t/p/w300/1pdfLvkbY9ohJlCjQH2JGjjcNsV.jpg", color: "red" },
+            { id: 3, title: "Project Hail Mary", type: "Books", status: "Reading", progress: "Pg 234/496", img: "https://covers.openlibrary.org/b/id/11481546-M.jpg", color: "green" },
+            { id: 4, title: "Hollow Knight", type: "Games", status: "Playing", progress: "Steam", img: "https://images.igdb.com/igdb/image/upload/t_cover_big/co1r7f.jpg", color: "purple" },
+            { id: 5, title: "Random Access Memories", type: "Music", status: "Owned", progress: "Vinyl", img: "https://i.discogs.com/83p1X_UeX80T7D8cWk8E9Fj_67sI30F9kR_-H84q66I/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTQ1NzA3/MjMtMTM4NjI1OTg0/OS0yOTkxLmpwZWc.jpeg", color: "yellow" },
+            { id: 6, title: "Blue-Eyes White Dragon", type: "Cards", status: "Owned", progress: "Holo - LOB-001", img: "https://images.ygoprodeck.com/images/cards/89631139.jpg", color: "orange" },
+            { id: 7, title: "Severance", type: "TV", status: "Completed", progress: "S1 E9", img: "https://image.tmdb.org/t/p/w300/jtnfNzqZwG4E32FwjAKAWvqGLsU.jpg", color: "blue" }
+        ];
+
+        const categories = [
+            { id: 'all', label: 'All Media', icon: '📦' },
+            { id: 'tv', label: 'TV Shows', icon: '📺' },
+            { id: 'movies', label: 'Movies', icon: '🎬' },
+            { id: 'books', label: 'Books', icon: '📚' },
+            { id: 'games', label: 'Video Games', icon: '🎮' },
+            { id: 'music', label: 'Music', icon: '🎵' },
+            { id: 'cards', label: 'Trading Cards', icon: '🃏' }
+        ];
+
+        let currentFilter = 'all';
+
+        // Initialize UI
+        function init() {
+            renderNav();
+            renderGrid();
+        }
+
+        // Render Sidebar Nav
+        function renderNav() {
+            const nav = document.getElementById('category-nav');
+            nav.innerHTML = categories.map(cat => `
+                <button onclick="setCategory('${cat.id}')" 
+                    class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors
+                    ${currentFilter === cat.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-gray-200'}">
+                    <span class="text-lg">${cat.icon}</span> ${cat.label}
+                </button>
+            `).join('');
+        }
+
+        // Change Category Filter
+        function setCategory(id) {
+            currentFilter = id;
+            const category = categories.find(c => c.id === id);
+            document.getElementById('current-category-title').textContent = category.label;
+            renderNav();
+            renderGrid();
+        }
+
+        // Render Media Grid
+        function renderGrid() {
+            const grid = document.getElementById('media-grid');
+            const filtered = currentFilter === 'all' 
+                ? mediaItems 
+                : mediaItems.filter(item => item.type.toLowerCase().includes(currentFilter.replace('shows','').trim()));
+            
+            document.getElementById('item-count').textContent = `${filtered.length} item${filtered.length !== 1 ? 's' : ''}`;
+
+            grid.innerHTML = filtered.map(item => `
+                <div class="group relative bg-gray-800 rounded-xl overflow-hidden border border-gray-700 hover:border-gray-500 transition shadow-sm hover:shadow-xl cursor-pointer flex flex-col">
+                    <div class="aspect-[2/3] w-full bg-gray-900 overflow-hidden relative">
+                        <img src="${item.img}" alt="${item.title}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300">
+                        <div class="absolute top-2 right-2 bg-black/70 backdrop-blur-sm text-xs font-semibold px-2 py-1 rounded text-${item.color}-400 border border-${item.color}-500/30">
+                            ${item.type}
+                        </div>
+                    </div>
+                    <div class="p-4 flex flex-col flex-1">
+                        <h3 class="font-bold text-gray-100 line-clamp-1 mb-1" title="${item.title}">${item.title}</h3>
+                        <div class="mt-auto flex justify-between items-center text-xs">
+                            <span class="text-gray-400">${item.status}</span>
+                            <span class="text-indigo-400 font-medium">${item.progress}</span>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `<div class="col-span-full py-12 text-center text-gray-500">No items found in this category.</div>`;
+            }
+        }
+
+        // Modal triggers
+        function triggerScan() {
+            document.getElementById('scan-modal').classList.replace('hidden', 'flex');
+        }
+
+        function simulateScanSuccess() {
+            document.getElementById('scan-modal').classList.replace('flex', 'hidden');
+            
+            // Add dummy item
+            mediaItems.unshift({
+                id: Date.now(),
+                title: "Dark Souls III",
+                type: "Games",
+                status: "Plan to Watch",
+                progress: "Scanned UPC",
+                img: "https://images.igdb.com/igdb/image/upload/t_cover_big/co1vce.jpg",
+                color: "purple"
+            });
+            
+            setCategory('games');
+            showToast("✅ Successfully scanned UPC and fetched from IGDB!");
+        }
+
+        function showToast(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'bg-gray-800 border border-green-500/50 text-white px-4 py-3 rounded-lg shadow-lg text-sm flex items-center gap-2 toast-animate';
+            toast.innerHTML = message;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Boot
+        init();
+    </script>
+</body>
+</html>
